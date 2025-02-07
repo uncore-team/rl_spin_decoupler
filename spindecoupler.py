@@ -3,7 +3,8 @@ RL-BASELINES-SOCKET SYSTEM FOR DECOUPLING RL FROM AGENT.
 
 v0.0.1
 
-(c) Uncore - Team, 2025
+(c) Juan-Antonio Fernández-Madrigal
+Uncore Team, 2025
 """
 
 from enum import Enum
