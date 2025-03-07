@@ -1,7 +1,7 @@
 """
 RL-BASELINES-SOCKET SYSTEM FOR DECOUPLING RL FROM AGENT.
 
-v0.0.1
+v1.0.0
 
 (c) Juan-Antonio Fernández-Madrigal
 Uncore Team, 2025
@@ -56,10 +56,11 @@ class BaselinesSide:
 
 		return obs			
 	
-	def stepGetObsSendAct(self, action,timeout:float = 10.0):
+	def stepSendActGetObs(self, action,timeout:float = 10.0):
 		"""
-		Call this method at the start of your gym.Env step() to get the 
-		observation as a dictionary and send the action (also a dictionary).
+		Call this method at the start of your gym.Env step() to send the action
+		to the agent and then get the resulting observation, both as 
+		dictionaries.
 		TIMEOUT is the timeout in seconds used for communication operations that
 		admit a timeout.
 		It raises RuntimeError() if any error in communications.
@@ -68,18 +69,19 @@ class BaselinesSide:
 		if len(res) > 0:
 			raise RuntimeError("Begin connection error. " + res)
 			
-		# send a STEP indicator to the agent interface and wait for its observations
+		# send a STEP indicator to the agent interface, that should be blocked
+		# in a readWhatToDo()
 		res = self._rlcomm.sendData(dict({"stepkind": "step"}))
 		if len(res) > 0:
 			raise RuntimeError("Sending what-to-do error. " + res)
 			
-		res,obs = self._rlcomm.readData(timeout) 
-		if len(res) > 0:
-			raise RuntimeError("Reading observation error. " + res)
-
 		res = self._rlcomm.sendData(action)
 		if len(res) > 0:
 			raise RuntimeError("Sending action error. " + res)
+
+		res,obs = self._rlcomm.readData(timeout) 
+		if len(res) > 0:
+			raise RuntimeError("Reading observation error. " + res)
 
 		res = self._rlcomm.end()
 		if len(res) > 0:
@@ -116,8 +118,8 @@ class AgentSide:
 		"""
 		Things that baselines is intending for the agent interface to do.
 		"""
-		SEND_OBS_REC_ACTION = 0	# send the observation to baselines to receive action
-		RESET_SEND_OBS = 1		# reset episode and then send observation to the baselines
+		REC_ACTION_SEND_OBS = 0	# receive action from baselines, executes it and sends back resulting observation
+		RESET_SEND_OBS = 1		# reset episode and then send observation to baselines
 		FINISH = 2				# finish experiment (and comms)
 	
 	
@@ -160,10 +162,10 @@ class AgentSide:
 		from the baselines and execute them. Commands can be received 
 		asynchronously, so this method blocks the caller (until timeout anyway).
 		It must be called at the start of each of those iterations.
-		It returns an indicator of what to do. Depending on that you must:
-			SEND_OBS_REC_ACTION : read an observation from the agent, turn it
-								  into a dictionary, and call the 
-								  sendObsRecAct() method to get the action.
+		It returns an indicator of what to do. Depending on that, you must:
+			REC_ACTION_SEND_OBS : read an action (see stepRecAct()), execute it
+								  and then send back an observation (see 
+								  stepSendObs()).
 			RESET_SEND_OBS:	reset the episode for the agent, read an observation
 							turn it into a dictionary and call the 
 							resetSendObs() method with that.
@@ -182,7 +184,7 @@ class AgentSide:
 			raise RuntimeError("Error receiving what-to-do indicator from baselines. " + res)
 				
 		if ind["stepkind"] == "step":
-			return AgentSide.WhatToDo.SEND_OBS_REC_ACTION
+			return AgentSide.WhatToDo.REC_ACTION_SEND_OBS
 		elif ind["stepkind"] == "reset":
 			return AgentSide.WhatToDo.RESET_SEND_OBS
 		elif ind["stepkind"] == "finish":
@@ -193,11 +195,26 @@ class AgentSide:
 		else:
 			raise(ValueError("Unknown what-to-do indicator [" + ind["stepkind"] + "]"))
 
-	def sendObsRecAct(self, obs,timeout:float = 10.0):
+	def stepRecAct(self, timeout:float = 10.0):
 		"""
-		Call this method if readWhatToDo() returned SEND_OBS_REC_ACTION with the
-		observation (a dictionary) to send back to baselines. It will return an
-		action (another dictionary) as a response.
+		Call this method if readWhatToDo() returned REC_ACTION_SEND_OBS. It
+		returns the action (a dictionary) received from Baselines.
+		TIMEOUT is the timeout in seconds for the operations with comms.
+		This method can raise RuntimeError if any error occurs in comms.
+		"""
+		if not self._commstarted:
+			raise RuntimeError("Cannot send/receive data with comms shut down")
+
+		res,actrec = self._rlcomm.readData(timeout) 
+		if len(res) > 0:
+			raise RuntimeError("Error reading action from baselines. " + res)	
+		return actrec
+
+	def stepSendObs(self, obs, timeout:float = 10.0):		
+		"""
+		Call this method if readWhatToDo() returned REC_ACTION_SEND_OBS, after
+		executing the action (after calling recAct()), and with the observation
+		(a dictionary) to be sent back to baselines.
 		TIMEOUT is the timeout in seconds for the operations with comms.
 		This method can raise RuntimeError if any error occurs in comms.
 		"""
@@ -207,12 +224,7 @@ class AgentSide:
 		res = self._rlcomm.sendData(obs)
 		if len(res) > 0:
 			raise RuntimeError("Error sending observation to baselines. " + res)	
-			
-		res,actrec = self._rlcomm.readData(timeout) 
-		if len(res) > 0:
-			raise RuntimeError("Error reading action from baselines. " + res)	
-		return actrec
-		
+					
 	def resetSendObs(self, obs):
 		"""
 		Call this method if readWhatToDo() returned RESET_SEND_OBS to send back

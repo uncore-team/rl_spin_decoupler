@@ -1,4 +1,4 @@
-# RL Spin Decoupler
+# Spin Decoupler
 
 
 This is a simple Python module that allows to sync an **RL algorithm** of [Stable-Baselines3](https://stable-baselines3.readthedocs.io/en/master/) to an **agent** (physical or simulated) that is able to get observations and execute actions.
