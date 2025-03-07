@@ -129,7 +129,7 @@ class BaseCommPoint:
 			res = str(e)
 		self._sock.settimeout(None) # to deactivate timeout in other operations
 		return res, result
-		
+			
 
 
 # -----------------------------------------------------------------------------
