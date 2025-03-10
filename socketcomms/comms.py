@@ -11,7 +11,7 @@ from enum import Enum
 import ipaddress
 import time
 import datetime
-import socket,pickle
+import socket,pickle,select
 from typing import Dict,List,Tuple
 
 
@@ -106,20 +106,22 @@ class BaseCommPoint:
 		except Exception as e:
 			return str(e)
 		
-	def readData(self, timeoutaccept: float = 2.0) -> Tuple[str, Dict]:
+	def readData(self, timeout: float = 2.0) -> Tuple[str, Dict]:
 		"""
-		Read the data (blocking) from the other side.
+		Read the data (blocking if timeout > 0.0) from the other side.
 		Return non-empty string if any error in the connection (connection closed, timeout in receiving, user interrupt, etc.)
 		"""
 		if not self._begun:
 			raise RuntimeError("Cannot send data in not-begun commpoint")
-		if timeoutaccept <= 0.0:
-			raise ValueError("Timeoutaccept must be > 0.0")
-		self._sock.settimeout(timeoutaccept) # after this, we assume the other side has shut down
+		if timeout <= 0.0:
+			timeout = None
+		self._sock.settimeout(timeout) # after this, we assume the other side has shut down
 		try:
 			if self._debug:
 				self._printInfo("Receiving...")
 			data = self._sock.recv(self._datachunkmaxsize)
+			if data == b'':
+				raise(RuntimeError("Connection closed while receiving"))
 			result = pickle.loads(data)
 			if self._debug:
 				self._printInfo("\tReceived " + str(len(data)) + " bytes.")
@@ -129,6 +131,22 @@ class BaseCommPoint:
 			res = str(e)
 		self._sock.settimeout(None) # to deactivate timeout in other operations
 		return res, result
+		
+	def checkDataToRead(self):
+		"""
+		Check whether the socket has data to read and return True in that case.
+		This is a non-blocking test.
+		"""
+		if not self._begun:
+			raise RuntimeError("Cannot send data in not-begun commpoint")
+		if self._debug:
+			self._printInfo("Peeking...")
+		ready_to_read, _, _ = select.select([self._sock], # sockets to check for reading
+											[], [], # writes and exceptions to check 
+											0) # non-blocking
+		if ready_to_read:
+			return True
+		return False
 			
 
 
