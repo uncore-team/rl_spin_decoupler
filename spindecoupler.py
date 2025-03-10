@@ -1,7 +1,7 @@
 """
 SYSTEM FOR DECOUPLING RL SPIN LOOP FROM AGENT SPIN LOOP.
 
-v1.0.0
+v1.1.0
 
 (c) Juan-Antonio Fernández-Madrigal
 Uncore Team, 2025
