@@ -37,6 +37,8 @@ class Agent:
 		if self._debug:
 			print("Step")
 
+		act = self._lastaction	# by default, continue executing the same last action
+
 		if not self._waitingforrlcommands: # not waiting new commands from RL, just executing last action
 		
 			if (... agent physical time ... - self._lastactiont0 >= self._rltimestep): # last action finished
@@ -44,44 +46,43 @@ class Agent:
 				observation = ...
 				self._commstoRL.stepSendObs(observation, ... reward...) # RL was waiting for this; no reward is actually needed here
 				self._waitingforrlcommands = True
-				act = self._lastaction
-				
-			else: # still doing the action
-				act = self._lastaction		
+
+			# else, still doing the action
 
 		else:  # waiting for new RL step() or reset()
 			
 			# read the last (pending) step()/reset() indicator and then proceed accordingly
 			whattodo = self._commstoRL.readWhatToDo()
-			if whattodo[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+			if whattodo is not None: # otherwise the RL has not sent any new command
+				if whattodo[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
 
-				act = whattodo[1]
-				self._lastaction = act
-				lat = ... agent physical time ... - self._lastactiont0
-				self._lastactiont0 = ... agent physical time ...
-				self._waitingforrlcommands = False # from now on, we are waiting to execute the action
-				self._commstoRL.stepSendLastActDur(lat)
+					act = whattodo[1]
+					lat = ... agent physical time ... - self._lastactiont0
+					self._lastactiont0 = ... agent physical time ...
+					self._waitingforrlcommands = False # from now on, we are waiting to execute the action
+					self._commstoRL.stepSendLastActDur(lat)
 
-			elif whattodo[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
+				elif whattodo[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
 
-				# reset the agent and the scenario
+					# reset the agent and the scenario
 
-				print("\tInitialized OK")
+					print("\tInitialized OK")
 
-				observation = ...
-				self._commstoRL.resetSendObs(observation)
-				act = ... null act ...
+					observation = ...
+					self._commstoRL.resetSendObs(observation)
+					act = ... null act ...
 
-			elif whattodo[0] == AgentSide.WhatToDo.FINISH:
-			
-				raise RuntimeError("Experiment finished")
+				elif whattodo[0] == AgentSide.WhatToDo.FINISH:
 				
-			else:
-				raise(ValueError("Unknown indicator data"))
+					raise RuntimeError("Experiment finished")
+					
+				else:
+					raise(ValueError("Unknown indicator data"))
 				
 		if self._debug:
 			print("Step panda -- end")
-		return act	 
+		self._lastaction = act
+		return act	 # return the action to execute it
 
 
 
