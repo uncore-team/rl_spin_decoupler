@@ -67,7 +67,7 @@ class RLSide:
 		res,obs = self._rlcomm.readData(timeout)
 		if len(res) > 0:
 			raise RuntimeError("Error reading after-reset observation from the agent. " + res)
-						
+					
 		return obs			
 
 	
@@ -84,8 +84,8 @@ class RLSide:
 		It raises RuntimeError() if any error in communications.
 		""" 
 		
-		# send a STEP indicator to the agent interface, that should be blocked
-		# in a readWhatToDo()
+		# send a STEP indicator to the agent interface, that should use
+		# readWhatToDo() to get the indicator
 		res = self._rlcomm.sendData(dict({"stepkind": "step",
 										  "action": action}))
 		if len(res) > 0:
@@ -214,8 +214,8 @@ class AgentSide:
 		"""
 		Call this method after receiving a REC_ACTION_SEND_OBS and starting the
 		action, being LAT the actual time during which the action previous to 
-		that one was executed before being substituted by the one in 
-		REC_ACTION_SEND_OBS.
+		that one was executed (before being substituted by the one in 
+		REC_ACTION_SEND_OBS).
 		This method can raise RuntimeError if any error occurs in comms.
 		"""
 
