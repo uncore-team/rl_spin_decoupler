@@ -183,7 +183,7 @@ class ServerCommPoint(BaseCommPoint):
 					print(f"Socket error: {e}")
 					raise
 		self._basesock.listen(1)
-		print("Server comm point listening")
+		print("---> Server comm point listening")
 		
 	def __str__(self) -> str:
 		return "Server listening at {}:{}, began: {}".format(self._servip,self._port,self._begun)
