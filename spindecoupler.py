@@ -58,17 +58,20 @@ class RLSide:
 		TIMEOUT is the timeout in seconds used for communication operations that
 		admit a timeout. If it is <0.0, no timeout is checked.
 		It raises RuntimeError() if any error in communications.
+		Return both the observation (a dictionary) and the agent time when that
+		observation was gathered (a float).
 		"""
 		
 		res = self._rlcomm.sendData(dict({"stepkind": "reset"}))
 		if len(res) > 0:
 			raise RuntimeError("Error sending what to do to the agent. " + res)	
 			
-		res,obs = self._rlcomm.readData(timeout)
+		res,obsato = self._rlcomm.readData(timeout)
 		if len(res) > 0:
-			raise RuntimeError("Error reading after-reset observation from the agent. " + res)
+			raise RuntimeError("Error reading after-reset observation from "
+							   "the agent. " + res)
 					
-		return obs			
+		return obsato["obs"], obsato["ato"] # return tuple
 
 	
 	def stepSendActGetObs(self, action,timeout:float = 10.0):
@@ -77,8 +80,9 @@ class RLSide:
 		to the agent and then get the resulting observation, both as 
 		dictionaries. The caller gets blocked until the agent executes the 
 		action and sends back the observation. Along with the observation, it
-		returns the total duration of the action previous to this one and the 
-		reward calculated by the agent for the current action.
+		returns the total duration of the action previous to this one, the 
+		reward calculated by the agent for the current action and the agent
+		time when it got the observation.
 		TIMEOUT is the timeout in seconds used for communication operations that
 		admit a timeout. If it is <0.0, no timeout is checked.
 		It raises RuntimeError() if any error in communications.
@@ -95,11 +99,11 @@ class RLSide:
 		if len(res) > 0:
 			raise RuntimeError("Error receiving last action duration: " + res)
 			
-		res,obsrew = self._rlcomm.readData(timeout) # blocks
+		res,obsrewato = self._rlcomm.readData(timeout) # blocks
 		if len(res) > 0:
 			raise RuntimeError("Error receiving step observation: " + res)
 
-		return lat["lat"],obsrew["obs"],obsrew["rew"]
+		return lat["lat"], obsrewato["obs"], obsrewato["rew"], obsrewato["ato"]
 
 				
 	def stepExpFinished(self, timeout:float = 10.0):
@@ -131,12 +135,15 @@ class AgentSide:
 		Things that RL is intending for the agent interface to do.
 		"""
 		
-		REC_ACTION_SEND_OBS = 0	# receive action from RL, executes it and sends back resulting observation and other stuff
-		RESET_SEND_OBS = 1		# reset episode and then send observation back to RL
+		REC_ACTION_SEND_OBS = 0	# receive action from RL, executes it and sends 
+								# back resulting observation and other stuff
+		RESET_SEND_OBS = 1		# reset episode and send observation back to RL
 		FINISH = 2				# finish experiment (and comms)
 	
 	
-	def __init__(self, ipbaselinespart:str, portbaselinespart:int, verbose:bool = False):
+	def __init__(self, ipbaselinespart:str, 
+				 portbaselinespart:int, 
+				 verbose:bool = False):
 		"""
 		IPBASELINESPART is the IPv4 of the baselines part of the system, e.g.,
 		"BaseCommPoint.get_ip()".
@@ -195,9 +202,10 @@ class AgentSide:
 		if not self._rlcomm.checkDataToRead():
 			return None
 		
-		# read the last (pending) step()/reset() msg and then proceed accordingly
-		res,ind = self._rlcomm.readData(timeout) # read a dict: { 'stepkind' : 'reset', 'step' or 'finish' ,
-												 #			      'action' : <action> if any}
+		# read last (pending) step()/reset() msg and then proceed accordingly
+		res,ind = self._rlcomm.readData(timeout) 
+		# read a dict: { 'stepkind' : 'reset', 'step' or 'finish' ,
+		#			      'action' : <action> if any}
 		if len(res) > 0:
 			raise RuntimeError("Error receiving what-to-do from RL: " + res)
 				
@@ -208,7 +216,8 @@ class AgentSide:
 		elif ind["stepkind"] == "finish":
 			return (AgentSide.WhatToDo.FINISH, None)
 		else:
-			raise(ValueError("Unknown what-to-do indicator [" + ind["stepkind"] + "]"))
+			raise(ValueError("Unknown what-to-do indicator [" + 
+							 ind["stepkind"] + "]"))
 
 	def stepSendLastActDur(self, lat:float):
 		"""
@@ -224,29 +233,31 @@ class AgentSide:
 			raise RuntimeError("Error sending lat to RL. " + res)	
 
 
-	def stepSendObs(self, obs, rew:float = 0.0):		
+	def stepSendObs(self, obs, agenttime:float = 0.0, rew:float = 0.0):		
 		"""
 		Call this method if readWhatToDo() returned REC_ACTION_SEND_OBS, after
 		executing the action, with the observation (a dictionary) to be sent 
 		back to the RL and reward calculated for that action, if any (usually,
 		reward is calculated at the RL side, but in some situations it could be
 		interesting to calculate it at the agent side).
+		Agenttime is the time when the agent got the observation.
 		This method can raise RuntimeError if any error occurs in comms.
 		"""
 		
-		res = self._rlcomm.sendData(dict({"obs":obs,"rew":rew}))
+		res = self._rlcomm.sendData(dict({"obs":obs,"rew":rew,"ato":agenttime}))
 		if len(res) > 0:
 			raise RuntimeError("Error sending observation/reward to RL. " + res)	
 
 					
-	def resetSendObs(self, obs):
+	def resetSendObs(self,obs,agenttime = 0.0):
 		"""
 		Call this method if readWhatToDo() returned RESET_SEND_OBS to send back
-		the first observation (OBS, a dictionary) got after an episode reset.
+		the first observation (OBS, a dictionary) got after an episode reset,
+		along with the time (of the agent) when that observation was gathered.
 		This method can raise RuntimeError if any error occurs in comms.
 		"""
 
-		res = self._rlcomm.sendData(obs)
+		res = self._rlcomm.sendData({"obs":obs,"ato":agenttime})
 		if len(res) > 0:
 			raise RuntimeError("Error sending observation to RL. " + res)	
  	
