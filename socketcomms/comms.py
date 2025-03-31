@@ -169,7 +169,7 @@ class ServerCommPoint(BaseCommPoint):
 		while not finish:
 			try:
 				self._basesock = socket.socket(socket.AF_INET,socket.SOCK_STREAM) # 1st arg: ip4, 2nd: TCP
-				self._basesock.bind((self._ipv4,self._port))
+				self._basesock.bind((self._ipv4,self._port)) # does not block
 				finish = True
 			except socket.error as e:
 				if e.errno == socket.errno.EADDRINUSE:
@@ -182,7 +182,7 @@ class ServerCommPoint(BaseCommPoint):
 				else:
 					print(f"Socket error: {e}")
 					raise
-		self._basesock.listen(1)
+		self._basesock.listen(1) # does not block
 		print("---> Server comm point listening")
 		
 	def __str__(self) -> str:
