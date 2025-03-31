@@ -1,7 +1,7 @@
 """
 SYSTEM FOR DECOUPLING RL SPIN LOOP FROM AGENT SPIN LOOP.
 
-v1.1.0
+v1.2.0
 
 (c) Juan-Antonio Fernández-Madrigal
 Uncore Team, 2025
@@ -34,7 +34,7 @@ class RLSide:
 											 # until free
 		if self._verbose:
 			print("RL decoupler enabled. Waiting for agent connection...")
-		res = self._rlcomm.begin(timeoutaccept = 60.0)
+		res = self._rlcomm.begin(timeoutaccept = 60.0) # blocks for agent
 		if len(res) > 0:
 			raise RuntimeError("No agent connection: " + res)
 		if self._verbose:
