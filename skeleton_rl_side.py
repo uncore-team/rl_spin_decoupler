@@ -28,7 +28,7 @@ class RLEnv:
 
 	def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
 	
-		obs = self._commstoagent.resetGetObs()
+		obs,agenttime = self._commstoagent.resetGetObs()
 
 		if self._debug:
 			print("\tobs read: {}".format(obs))
@@ -38,7 +38,7 @@ class RLEnv:
         
 	def step(self, action):
 	
-		lat,obs,rew = self._commstoagent.stepSendActGetObs(action) 
+		lat,obs,rew,agenttime = self._commstoagent.stepSendActGetObs(action)  
 
 		if self._debug:
 			print("\taction executed: {}; last action dur: {}; agent reward: {}".format(action,lat,rew))
@@ -61,12 +61,8 @@ if __name__ == '__main__':
 	env = RLEnv(True)
 	model = ...
 	
-	# to use tensorboard afterwards to see logs:
-	checkpoint_callback=CheckpointCallback(save_freq=10000,save_path="logs",name_prefix="example")
-	
 	numstepsexp = 1_000 
-	model.learn(total_timesteps=numstepsexp, 
-				callback=checkpoint_callback)
+	model.learn(total_timesteps=numstepsexp)
 	model.save(...)
 
 	print("Press Enter to end...")
