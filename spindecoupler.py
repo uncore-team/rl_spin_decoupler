@@ -8,7 +8,7 @@ Uncore Team, 2025
 """
 
 from enum import Enum
-from socketcomms.comms import ClientCommPoint,ServerCommPoint
+from .socketcomms.comms import ClientCommPoint,ServerCommPoint
 
 
 #-------------------------------------------------------------------------------
