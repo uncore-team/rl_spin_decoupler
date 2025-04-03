@@ -1,1 +1,1 @@
-from .spindecoupler import AgentSide,BaselinesSide
+from .spindecoupler import AgentSide,RLSide
