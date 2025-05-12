@@ -103,7 +103,7 @@ class RLSide:
 		if len(res) > 0:
 			raise RuntimeError("Error receiving step observation: " + res)
 
-		return lat["lat"], obsrewato["obs"], obsrewato["rew"], obsrewato["ato"]
+		return lat["lat_sim"], lat["lat_wall"], obsrewato["obs"], obsrewato["rew"], obsrewato["ato"]
 
 				
 	def stepExpFinished(self, timeout:float = 10.0):
@@ -219,7 +219,7 @@ class AgentSide:
 			raise(ValueError("Unknown what-to-do indicator [" + 
 							 ind["stepkind"] + "]"))
 
-	def stepSendLastActDur(self, lat:float):
+	def stepSendLastActDur(self, lat_sim:float, lat_wall:float):
 		"""
 		Call this method after receiving a REC_ACTION_SEND_OBS and starting the
 		action, being LAT the actual time during which the action previous to 
@@ -228,7 +228,7 @@ class AgentSide:
 		This method can raise RuntimeError if any error occurs in comms.
 		"""
 
-		res = self._rlcomm.sendData(dict({"lat": lat}))
+		res = self._rlcomm.sendData(dict({"lat_sim": lat_sim, "lat_wall":lat_wall}))
 		if len(res) > 0:
 			raise RuntimeError("Error sending lat to RL. " + res)	
 
