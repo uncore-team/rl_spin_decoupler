@@ -261,4 +261,96 @@ class AgentSide:
 		if len(res) > 0:
 			raise RuntimeError("Error sending observation to RL. " + res)	
  	
- 			 	
+
+#-------------------------------------------------------------------------------
+#
+#	Base Class: RLSideQuery
+#
+#-------------------------------------------------------------------------------			 	
+
+
+class RLSideQuery:
+	"""
+	Just answers queries from the agent.
+
+	"""
+	def __init__(self, port: int, verbose: bool = False):
+		self._verbose = verbose
+		self._srv = ServerCommPoint(port)
+		if self._verbose:
+			print(f"[Query Server] Waiting for agent query connection on port {port}...")
+		res = self._srv.begin(timeoutaccept=60.0)
+		if len(res) > 0:
+			raise RuntimeError("No agent connection for query channel: " + res)
+		if self._verbose:
+			print("[Query Server] Agent connected for queries.")
+	
+	def __del__(self):
+		res = self._srv.end()
+		if len(res) > 0:
+			print("Error closing query channel (RL side): " + res)
+		if self._verbose:
+			print("Communications closed in the RL side.")
+
+	def receive_query(self, timeout: float = -1.0):
+		"""
+		Blocks until receiving a new query or until timeout ends (if >=0).
+		Returns the received dict (e.g.: {"stepkind":"query","obs":{...}}).
+		"""
+		res, msg = self._srv.readData(timeout)
+		if len(res) > 0:
+			raise RuntimeError("Error reading query from agent: " + res)
+		return msg
+
+
+	def send_action(self, action_dict):
+		"""
+		Sends the predicted action to the agent as a dictionary.
+		"""
+		res = self._srv.sendData({"action": action_dict})
+		if len(res) > 0:
+			raise RuntimeError("Error sending action to agent (query channel): " + res)
+
+
+#-------------------------------------------------------------------------------
+#
+#	Base Class: AgentSideQuery
+#
+#-------------------------------------------------------------------------------		
+
+
+class AgentSideQuery:
+	"""
+	Client for sending virtual observations to the RL side and received their 
+	corresponding actions.
+	"""
+
+	def __init__(self, ip_rl: str, port_rl: int, verbose: bool = False):
+		self._verbose = verbose
+		self._comm = ClientCommPoint(ip_rl, port_rl)
+		res = self._comm.begin()
+		if len(res) > 0:
+			raise RuntimeError("[Query client] Error connecting query channel to RL: " + res)
+		if self._verbose:
+			print("[Query client] Agent connected to RL query channel.")
+	
+	def __del__(self):
+		res = self._comm.end()
+		if len(res) > 0:
+			print("[Query client] Error closing query channel (agent side): " + res)
+		if self._verbose:
+			print("[Query client] Communications closed in the Agent side.")
+
+	def query_action(self, obs_dict, timeout: float = 10.0):
+		"""
+		Sends the observations and receives an action in response.
+		"""
+		res = self._comm.sendData({"stepkind": "query", "obs": obs_dict})
+		if len(res) > 0:
+			raise RuntimeError("[Query client] Error sending query obs to RL: " + res)
+
+		res, msg = self._comm.readData(timeout)
+		if len(res) > 0:
+			raise RuntimeError("[Query client] Error receiving query action from RL: " + res)
+
+		return msg["action"]
