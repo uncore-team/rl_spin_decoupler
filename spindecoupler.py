@@ -292,6 +292,22 @@ class RLSideQuery:
 		if self._verbose:
 			print("Communications closed in the RL side.")
 
+	def reconnect(self, timeoutaccept: float = 60.0):
+		"""
+		Closes the current connection and waits for a new agent connection.
+		"""
+		res = self._srv.end()
+		if len(res) > 0:
+			raise RuntimeError("Error closing query channel (RL side): " + res)
+		if self._verbose:
+			print("[Query Server] Waiting for agent query reconnection...")
+		res = self._srv.begin(timeoutaccept=timeoutaccept)
+		if len(res) > 0:
+			raise RuntimeError("No agent reconnection for query channel: " + res)
+		if self._verbose:
+			print("[Query Server] Agent reconnected for queries.")
+
+
 	def receive_query(self, timeout: float = -1.0):
 		"""
 		Blocks until receiving a new query or until timeout ends (if >=0).
