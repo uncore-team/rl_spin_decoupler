@@ -115,8 +115,8 @@ class RLSide:
 		"""
 		
 		self._rlcomm.sendData(dict({"stepkind": "finish"}))
-		 	
-		 	
+
+	
 #-------------------------------------------------------------------------------
 #
 #	Base Class: AgentSide
@@ -260,7 +260,8 @@ class AgentSide:
 		res = self._rlcomm.sendData({"obs":obs,"ato":agenttime, "info": extra_info})
 		if len(res) > 0:
 			raise RuntimeError("Error sending observation to RL. " + res)	
- 	
+		
+
 
 #-------------------------------------------------------------------------------
 #
@@ -328,6 +329,44 @@ class RLSideQuery:
 			raise RuntimeError("Error sending action to agent (query channel): " + res)
 
 
+	def wait_for_query(self, timeout: float = -1.0) -> bool:
+		"""Block until a 'query' flag arrives (or timeout expires).
+
+		Args:
+			timeout (float): Maximum time in seconds to wait for data.
+				A negative value means "block indefinitely".
+
+		Returns:
+			bool: True if a valid query flag was received, False if no data
+			were available within the given timeout (when timeout >= 0).
+
+		Raises:
+			RuntimeError: On communication errors.
+			ValueError: On unexpected message format or stepkind.
+		"""
+		# Non-blocking behavior when timeout >= 0 and no data pending:
+		if timeout >= 0.0 and not self._srv.checkDataToRead():
+			return False
+
+		res, msg = self._srv.readData(timeout)
+		if len(res) > 0:
+			raise RuntimeError("Error reading query from agent: " + res)
+
+		if not isinstance(msg, dict):
+			raise ValueError(f"[Query Server] Unexpected message type: {type(msg)}")
+
+		stepkind = msg.get("stepkind", None)
+		if stepkind != "query":
+			raise ValueError(
+				f"[Query Server] Unexpected stepkind while waiting for query: {stepkind}"
+			)
+
+		if self._verbose:
+			print("[Query Server] Query flag received.")
+
+		return True
+
+
 #-------------------------------------------------------------------------------
 #
 #	Base Class: AgentSideQuery
@@ -370,3 +409,23 @@ class AgentSideQuery:
 			raise RuntimeError("[Query client] Error receiving query action from RL: " + res)
 
 		return msg["action"]
+	
+
+	def send_query(self):
+		"""Send a 'query' flag to the RL side.
+
+		The message is a small dictionary with the single field::
+
+			{"stepkind": "query"}
+
+		The RL side will interpret this as a request to perform exactly one
+		evaluation/test step using its own environment and observation.
+		"""
+		res = self._comm.sendData({"stepkind": "query"})
+		if len(res) > 0:
+			raise RuntimeError(
+				"[Query client] Error sending query flag to RL: " + res
+			)
+
+		if self._verbose:
+			print("[Query client] Query flag sent to RL.")
