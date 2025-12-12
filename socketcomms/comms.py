@@ -9,6 +9,7 @@ https://babel.isa.uma.es/jafma
 
 from enum import Enum
 import ipaddress
+import struct
 import time
 import datetime
 import socket,pickle,select
@@ -21,11 +22,11 @@ from typing import Dict,List,Tuple
 #
 # -----------------------------------------------------------------------------
 
-
 class BaseCommPoint:
 	"""
 	Communication point.
 	"""
+	_LEN_STRUCT = struct.Struct("!Q")  # 8-byte unsigned length, network byte order
 
 	class Kind(Enum):
 		"""
@@ -87,6 +88,28 @@ class BaseCommPoint:
 		Enable or disable debug messages.
 		"""
 		self._debug = st
+
+	def _recv_exact(self, nbytes: int) -> bytes:
+		"""Receive exactly nbytes from the socket.
+
+		Args:
+			nbytes (int): Number of bytes to read.
+
+		Returns:
+			bytes: The received bytes.
+
+		Raises:
+			RuntimeError: If the connection is closed before receiving enough data.
+		"""
+		chunks = []
+		remaining = nbytes
+		while remaining > 0:
+			chunk = self._sock.recv(min(self._datachunkmaxsize, remaining))
+			if chunk == b"":
+				raise RuntimeError("Connection closed while receiving")
+			chunks.append(chunk)
+			remaining -= len(chunk)
+		return b"".join(chunks)
 					
 	def sendData(self, data: Dict) -> str:
 		"""
@@ -95,11 +118,19 @@ class BaseCommPoint:
 		"""
 		if not self._begun:
 			raise RuntimeError("Cannot send data in not-begun commpoint")
-		mydictser = pickle.dumps(data)
+		
 		try:
+			payload = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # Prefix with payload length to delimit messages over TCP stream.
+			header = BaseCommPoint._LEN_STRUCT.pack(len(payload))
+			
 			if self._debug:
-				self._printInfo("Sending " + str(len(mydictser)) + " bytes...")
-			self._sock.send(mydictser)
+				self._printInfo(f"Sending framed msg: header={len(header)} bytes, payload={len(payload)} bytes...")
+
+            # sendall guarantees full transmission.
+			self._sock.sendall(header)
+			self._sock.sendall(payload)
 			if self._debug:
 				self._printInfo("\tSent ok.")
 			return ""
@@ -108,28 +139,35 @@ class BaseCommPoint:
 		
 	def readData(self, timeout: float = 2.0) -> Tuple[str, Dict]:
 		"""
-		Read the data (blocking if timeout > 0.0) from the other side.
-		Return non-empty string if any error in the connection (connection closed, timeout in receiving, user interrupt, etc.)
+		Read one message (blocking if timeout > 0.0) from the other side.
+		Return non-empty string if any error in the connection.
 		"""
 		if not self._begun:
 			raise RuntimeError("Cannot send data in not-begun commpoint")
+
 		if timeout <= 0.0:
 			timeout = None
-		self._sock.settimeout(timeout) # after this, we assume the other side has shut down
+		self._sock.settimeout(timeout)
+
 		try:
 			if self._debug:
 				self._printInfo("Receiving...")
-			data = self._sock.recv(self._datachunkmaxsize)
-			if data == b'':
-				raise(RuntimeError("Connection closed while receiving"))
-			result = pickle.loads(data)
+
+			# Read framed header (8 bytes) then payload.
+			header = self._recv_exact(BaseCommPoint._LEN_STRUCT.size)
+			(msg_len,) = BaseCommPoint._LEN_STRUCT.unpack(header)
+
+			payload = self._recv_exact(msg_len)
+			result = pickle.loads(payload)
+
 			if self._debug:
-				self._printInfo("\tReceived " + str(len(data)) + " bytes.")
+				self._printInfo(f"\tReceived framed msg: payload={msg_len} bytes.")
 			res = ""
 		except Exception as e:
 			result = None
 			res = str(e)
-		self._sock.settimeout(None) # to deactivate timeout in other operations
+
+		self._sock.settimeout(None)
 		return res, result
 		
 	def checkDataToRead(self):
@@ -200,6 +238,7 @@ class ServerCommPoint(BaseCommPoint):
 		self._basesock.settimeout(timeoutaccept) # after this, we assume the other side has shut down
 		try:
 			self._sock, _ = self._basesock.accept() # wait for calling us
+			self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) # disable Nagle's algorithm to reduce latency spikes
 			self._begun = True
 			self._basesock.settimeout(None) # to deactivate timeout in other operations
 			return ""
@@ -250,6 +289,7 @@ class ClientCommPoint(BaseCommPoint):
 			self.end()
 		try:
 			self._sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM) # 1st arg: ip4, 2nd: TCP
+			self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) # disable Nagle's algorithm to reduce latency spikes
 			self._sock.connect((self._ipv4,self._port)) # if bind-listen has been done on the other side but accept has not, ends immediately even when the server is not accpeting at the time (connection is kept pending), and data can be sent; if bind-listen has not been done on the other side, an error is raised
 			self._begun = True
 			return ""
