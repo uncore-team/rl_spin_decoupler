@@ -1,0 +1,7 @@
+# RL Spin Decoupler core library requirements
+# This package uses only Python standard library modules.
+# No third-party dependencies are required for core functionality.
+
+# Optional (for RL examples/integration):
+# stable-baselines3>=2.0
+# gymnasium>=0.29
