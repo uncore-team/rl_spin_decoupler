@@ -11,6 +11,7 @@ from enum import Enum
 import ipaddress
 import time
 import datetime
+import struct
 import socket,pickle,select
 from typing import Dict,List,Tuple
 
@@ -96,15 +97,30 @@ class BaseCommPoint:
 		if not self._begun:
 			raise RuntimeError("Cannot send data in not-begun commpoint")
 		mydictser = pickle.dumps(data)
+		frame = struct.pack("!I", len(mydictser)) + mydictser
 		try:
 			if self._debug:
 				self._printInfo("Sending " + str(len(mydictser)) + " bytes...")
-			self._sock.send(mydictser)
+			self._sock.sendall(frame)
 			if self._debug:
 				self._printInfo("\tSent ok.")
 			return ""
 		except Exception as e:
 			return str(e)
+
+	def _recv_exactly(self, size: int) -> bytes:
+		"""
+		Read exactly SIZE bytes or raise if the connection closes early.
+		"""
+		chunks = []
+		pending = size
+		while pending > 0:
+			chunk = self._sock.recv(pending)
+			if chunk == b'':
+				raise(RuntimeError("Connection closed while receiving"))
+			chunks.append(chunk)
+			pending -= len(chunk)
+		return b''.join(chunks)
 		
 	def readData(self, timeout: float = 2.0) -> Tuple[str, Dict]:
 		"""
@@ -119,9 +135,9 @@ class BaseCommPoint:
 		try:
 			if self._debug:
 				self._printInfo("Receiving...")
-			data = self._sock.recv(self._datachunkmaxsize)
-			if data == b'':
-				raise(RuntimeError("Connection closed while receiving"))
+			head = self._recv_exactly(4)
+			datasize = struct.unpack("!I", head)[0]
+			data = self._recv_exactly(datasize)
 			result = pickle.loads(data)
 			if self._debug:
 				self._printInfo("\tReceived " + str(len(data)) + " bytes.")

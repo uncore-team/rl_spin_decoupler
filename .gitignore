@@ -1,2 +1,9 @@
 README.md.backup
 __pycache__/
+.coverage
+.pytest_cache/
+.venv/
+coverage.xml
+htmlcov/
+*.egg-info/
+docs/_build/
