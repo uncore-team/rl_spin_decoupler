@@ -78,7 +78,7 @@ jobs:
 
       - name: Smoke test executable examples
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
-        run: python -m pytest tests/test_examples_smoke.py -q --no-cov
+        run: python -m pytest tests/test_examples_smoke.py -q --override-ini addopts=""
 
       - name: Upload coverage artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
