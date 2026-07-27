@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 import socket
 import threading
 import time
@@ -32,8 +34,7 @@ def test_rl_agent_full_cycle_over_tcp(free_tcp_port, force_localhost):
 			rl = RLSide(free_tcp_port, verbose=True)
 			results["reset"] = rl.resetGetObs(timeout=2.0)
 			results["steps"] = [
-				rl.stepSendActGetObs(action, timeout=2.0)
-				for action in actions
+				rl.stepSendActGetObs(action, timeout=2.0) for action in actions
 			]
 			rl.stepExpFinished(timeout=2.0)
 		except BaseException as exc:
@@ -104,7 +105,9 @@ def test_rl_side_raises_after_abrupt_agent_disconnect(free_tcp_port, force_local
 	assert "Error reading after-reset observation from the agent." in results["error"]
 
 
-def test_server_commpoint_reports_malformed_network_payload(free_tcp_port, force_localhost):
+def test_server_commpoint_reports_malformed_network_payload(
+	free_tcp_port, force_localhost
+):
 	results = {}
 	ready = threading.Event()
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 from enum import Enum
 
 import pytest
@@ -106,7 +108,9 @@ def test_state_machine_handles_reset_then_sends_observation():
 
 
 def test_state_machine_computes_lat_and_waits_before_sending_observation():
-	comm = RecordingComm(commands=[(AgentSide.WhatToDo.REC_ACTION_SEND_OBS, "turn-left")])
+	comm = RecordingComm(
+		commands=[(AgentSide.WhatToDo.REC_ACTION_SEND_OBS, "turn-left")]
+	)
 	agent = AgentHarness(comm, rltimestep=0.5)
 	agent._lastactiont0 = 1.0
 

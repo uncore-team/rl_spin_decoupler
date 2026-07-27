@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 """ 
 AGENT PART OF THE RL-AGENT DECOUPLING EXAMPLE
 Start this after the other.

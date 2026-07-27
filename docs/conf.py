@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Sphinx configuration for rl_spin_decoupler."""
 
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -13,10 +14,10 @@ author = "Juan-Antonio Fernandez-Madrigal"
 release = "1.2.0"
 
 extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
+	"sphinx.ext.autodoc",
+	"sphinx.ext.autosummary",
+	"sphinx.ext.napoleon",
+	"sphinx.ext.viewcode",
 ]
 
 templates_path = ["_templates"]

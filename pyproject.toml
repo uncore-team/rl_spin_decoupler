@@ -35,6 +35,8 @@ rl = [
 dev = [
     "pytest>=8.3",
     "pytest-cov>=5",
+    "ruff>=0.6.9",
+    "pre-commit>=3.8",
 ]
 docs = [
     "Sphinx>=7.4,<8.0",
@@ -60,3 +62,22 @@ skip_covered = false
 exclude_also = [
     "if __name__\\s*==\\s*[\"']__main__[\"']:",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+extend-exclude = [
+    "docs/_build",
+    "README.md",
+    "skeleton_agent_side.py",
+    "skeleton_rl_side.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["UP032"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+docstring-code-format = true

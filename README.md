@@ -1,9 +1,14 @@
 # RL Spin Decoupler
 
+[![Version](https://img.shields.io/github/v/release/uncore-team/rl_spin_decoupler?label=version)](https://github.com/uncore-team/rl_spin_decoupler/releases)
+[![License](https://img.shields.io/github/license/uncore-team/rl_spin_decoupler)](https://github.com/uncore-team/rl_spin_decoupler/blob/main/LICENSE)
 [![CI](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml)
 [![Docs](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml)
 
 Documentation: https://uncore-team.github.io/rl_spin_decoupler/
+
+Example code: [tutorial](docs/tutorial.rst) | [RL skeleton](skeleton_rl_side.py) | [Agent skeleton](skeleton_agent_side.py)
 
 
 This is a simple Python module that allows to sync an **RL algorithm** (e.g., from [Stable-Baselines3](https://stable-baselines3.readthedocs.io/en/master/)) to an **agent**, physical or simulated, that is able to get observations and execute actions.
@@ -67,6 +72,13 @@ python -m sphinx -b html docs docs/_build/html
 ```
 
 The generated documentation home page is `docs/_build/html/index.html`.
+
+Run lint and formatting checks locally:
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+```
 
 ## Download from GitHub
 
