@@ -1,5 +1,10 @@
 # RL Spin Decoupler
 
+[![CI](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml)
+[![Docs](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml)
+
+Documentation: https://uncore-team.github.io/rl_spin_decoupler/
+
 
 This is a simple Python module that allows to sync an **RL algorithm** (e.g., from [Stable-Baselines3](https://stable-baselines3.readthedocs.io/en/master/)) to an **agent**, physical or simulated, that is able to get observations and execute actions.
 
@@ -38,6 +43,30 @@ Optional: if you want to install optional RL packages listed in `requirements.tx
 ```bash
 pip install -r requirements.txt
 ```
+
+Editable install for development:
+
+```bash
+pip install -e .
+```
+
+Developer verification
+
+Run the test suite with coverage:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+Build the documentation locally:
+
+```bash
+pip install -e ".[docs]"
+python -m sphinx -b html docs docs/_build/html
+```
+
+The generated documentation home page is `docs/_build/html/index.html`.
 
 ## Download from GitHub
 
