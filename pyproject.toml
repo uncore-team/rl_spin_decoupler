@@ -8,7 +8,7 @@ version = "1.2.0"
 description = "Socket-based decoupling utilities for reinforcement learning and agent spin loops."
 readme = "README.md"
 requires-python = ">=3.8"
-license = "GPL-3.0-only"
+license = { file = "LICENSE" }
 authors = [
     { name = "Juan-Antonio Fernandez-Madrigal" }
 ]
