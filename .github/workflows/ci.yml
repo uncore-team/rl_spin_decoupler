@@ -76,6 +76,10 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
         run: python -m pytest --cov-report=html
 
+      - name: Smoke test executable examples
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        run: python -m pytest tests/test_examples_smoke.py -q
+
       - name: Upload coverage artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
         uses: actions/upload-artifact@v4
@@ -87,14 +91,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Optional Codecov upload.
-      # Enable this after deciding to publish coverage externally.
-      # For private repositories, add a CODECOV_TOKEN repository secret and
-      # uncomment the step below.
-      # - name: Upload coverage to Codecov
-      #   if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
-      #   uses: codecov/codecov-action@v4
-      #   with:
-      #     files: coverage.xml
-      #     fail_ci_if_error: false
-      #     token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage to Codecov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false

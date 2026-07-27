@@ -48,6 +48,9 @@ And the agent side does this:
 Timing values
 -------------
 
+For a complete executable two-process demo, see ``examples/README.md`` in the
+repository root.
+
 - ``LAT`` is the duration of the previous action, measured by the agent clock.
 - ``ATO`` is the agent-side time when an observation was sampled.
 - ``t_wall`` is not produced by the library itself; it is typically captured by
