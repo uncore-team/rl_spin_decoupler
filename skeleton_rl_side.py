@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 """
 EXAMPLE (STRUCTURE) OF THE RL SIDE THAT IS DECOUPLED
 To be launched first, then the agent part.

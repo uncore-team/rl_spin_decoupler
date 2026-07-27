@@ -1,13 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 import pickle
 import socket
 import struct
-from types import SimpleNamespace
 
 import pytest
+from rl_spin_decoupler.socketcomms.comms import ClientCommPoint, ServerCommPoint
 
 import spindecoupler as spindecoupler_module
 from spindecoupler import AgentSide, BaseCommPoint, RLSide
-from rl_spin_decoupler.socketcomms.comms import ClientCommPoint, ServerCommPoint
 
 
 class FakeSocket:
@@ -165,7 +166,10 @@ def test_print_info_and_set_debug(capsys):
 
 def test_get_ip_returns_socket_address(monkeypatch):
 	fake_socket = FakeIPSocket(ip="10.0.0.8")
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(fake_socket))
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(fake_socket),
+	)
 
 	assert BaseCommPoint.get_ip() == "10.0.0.8"
 	assert fake_socket.closed is True
@@ -173,7 +177,10 @@ def test_get_ip_returns_socket_address(monkeypatch):
 
 def test_get_ip_falls_back_to_loopback(monkeypatch):
 	fake_socket = FakeIPSocket(connect_error=OSError("unreachable"))
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(fake_socket))
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(fake_socket),
+	)
 
 	assert BaseCommPoint.get_ip() == "127.0.0.1"
 	assert fake_socket.closed is True
@@ -345,8 +352,13 @@ def test_server_constructor_retries_busy_port(monkeypatch, capsys):
 		def listen(self, backlog):
 			self.backlog = backlog
 
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(RetrySocket()))
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.time.sleep", lambda _seconds: None)
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(RetrySocket()),
+	)
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.time.sleep", lambda _seconds: None
+	)
 	monkeypatch.setattr(BaseCommPoint, "get_ip", classmethod(lambda cls: "127.0.0.1"))
 
 	server = ServerCommPoint(24000)
@@ -366,7 +378,10 @@ def test_server_constructor_raises_non_retryable_socket_error(monkeypatch, capsy
 		def listen(self, _backlog):
 			raise AssertionError("listen should not be called")
 
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(BrokenBindSocket()))
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(BrokenBindSocket()),
+	)
 	monkeypatch.setattr(BaseCommPoint, "get_ip", classmethod(lambda cls: "127.0.0.1"))
 
 	with pytest.raises(OSError, match="bad bind"):
@@ -388,8 +403,13 @@ def test_server_constructor_aborts_after_too_many_busy_retries(monkeypatch, caps
 		def listen(self, _backlog):
 			raise AssertionError("listen should not be called")
 
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(AlwaysBusySocket()))
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.time.sleep", lambda _seconds: None)
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(AlwaysBusySocket()),
+	)
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.time.sleep", lambda _seconds: None
+	)
 	monkeypatch.setattr(BaseCommPoint, "get_ip", classmethod(lambda cls: "127.0.0.1"))
 
 	with pytest.raises(OSError, match="still in use"):
@@ -462,7 +482,10 @@ def test_client_begin_and_end(monkeypatch):
 		fake_socket.connect_calls.append(address)
 
 	fake_socket.connect = connect
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(fake_socket))
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(fake_socket),
+	)
 
 	client = ClientCommPoint("127.0.0.1", 24000)
 
@@ -479,7 +502,10 @@ def test_client_begin_reports_connection_error(monkeypatch):
 		raise OSError("connect failed")
 
 	fake_socket.connect = connect
-	monkeypatch.setattr("rl_spin_decoupler.socketcomms.comms.socket.socket", FakeSocketFactory(fake_socket))
+	monkeypatch.setattr(
+		"rl_spin_decoupler.socketcomms.comms.socket.socket",
+		FakeSocketFactory(fake_socket),
+	)
 
 	client = ClientCommPoint("127.0.0.1", 24000)
 
@@ -516,7 +542,10 @@ def test_rlside_init_verbose_and_error_path(monkeypatch, capsys):
 	with pytest.raises(RuntimeError, match="No agent connection: timeout"):
 		RLSide(24000, verbose=True)
 
-	assert "RL decoupler enabled. Waiting for agent connection..." in capsys.readouterr().out
+	assert (
+		"RL decoupler enabled. Waiting for agent connection..."
+		in capsys.readouterr().out
+	)
 
 
 def test_agentside_init_verbose_and_error_path(monkeypatch, capsys):
@@ -533,7 +562,9 @@ def test_agentside_init_verbose_and_error_path(monkeypatch, capsys):
 
 	monkeypatch.setattr(spindecoupler_module, "ClientCommPoint", FakeClientCommPoint)
 
-	with pytest.raises(RuntimeError, match="Error starting connection with RL. connect failed"):
+	with pytest.raises(
+		RuntimeError, match="Error starting connection with RL. connect failed"
+	):
 		AgentSide("127.0.0.1", 24000, verbose=True)
 
 	assert "Agent decoupler enabled." in capsys.readouterr().out
@@ -570,7 +601,10 @@ def test_agentside_read_what_to_do_returns_none_when_no_data():
 @pytest.mark.parametrize(
 	"indicator, expected",
 	[
-		({"stepkind": "step", "action": {"a": 1}}, (AgentSide.WhatToDo.REC_ACTION_SEND_OBS, {"a": 1})),
+		(
+			{"stepkind": "step", "action": {"a": 1}},
+			(AgentSide.WhatToDo.REC_ACTION_SEND_OBS, {"a": 1}),
+		),
 		({"stepkind": "reset"}, (AgentSide.WhatToDo.RESET_SEND_OBS, None)),
 		({"stepkind": "finish"}, (AgentSide.WhatToDo.FINISH, None)),
 	],
@@ -636,7 +670,12 @@ def test_rlside_reset_get_obs_and_step_send_act_get_obs():
 	rl = make_rl_side(fake_comm)
 
 	assert rl.resetGetObs(timeout=0.4) == ({"state": "reset"}, 1.5)
-	assert rl.stepSendActGetObs({"move": 1}, timeout=0.4) == (0.2, {"state": "step"}, 3.0, 2.5)
+	assert rl.stepSendActGetObs({"move": 1}, timeout=0.4) == (
+		0.2,
+		{"state": "step"},
+		3.0,
+		2.5,
+	)
 	assert fake_comm.sent == [
 		{"stepkind": "reset"},
 		{"stepkind": "step", "action": {"move": 1}},

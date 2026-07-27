@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+
 """Public package API for rl_spin_decoupler."""
 
 from .spindecoupler import (
