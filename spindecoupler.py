@@ -8,7 +8,25 @@ Uncore Team, 2025
 """
 
 from enum import Enum
-from socketcomms.comms import ClientCommPoint,ServerCommPoint
+
+try:
+	from rl_spin_decoupler.socketcomms.comms import (
+		BaseCommPoint,
+		ClientCommPoint,
+		ServerCommPoint,
+	)
+except ImportError:  # pragma: no cover
+	from socketcomms.comms import BaseCommPoint, ClientCommPoint, ServerCommPoint
+
+
+__version__ = "1.2.0"
+__all__ = [
+	"AgentSide",
+	"BaseCommPoint",
+	"ClientCommPoint",
+	"RLSide",
+	"ServerCommPoint",
+]
 
 
 #-------------------------------------------------------------------------------
@@ -43,7 +61,10 @@ class RLSide:
 			
 	def __del__(self):
 	
-		res = self._rlcomm.end()
+		rlcomm = getattr(self,"_rlcomm",None)
+		if rlcomm is None:
+			return
+		res = rlcomm.end()
 		if len(res) > 0:
 			print("Error closing communications with the agent: " + res)
 		if self._verbose:
@@ -166,7 +187,10 @@ class AgentSide:
 					
 	def __del__(self):
 	
-		res = self._rlcomm.end()
+		rlcomm = getattr(self,"_rlcomm",None)
+		if rlcomm is None:
+			return
+		res = rlcomm.end()
 		if len(res) > 0:
 			raise RuntimeError("Error stopping connection with RL: " + res)
 		if self._verbose:
