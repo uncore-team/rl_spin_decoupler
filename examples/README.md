@@ -1,45 +1,41 @@
-# Example: end-to-end decoupled run
+# Examples
 
-This folder contains a complete and executable example of RL Spin Decoupler with two real Python processes communicating through localhost TCP sockets.
+This folder contains complete end-to-end examples with two real Python
+processes (RL side + agent side) synchronized over localhost TCP sockets.
 
-- [rl_side_demo.py](rl_side_demo.py): RL-side process (server, started first).
-- [agent_side_demo.py](agent_side_demo.py): Agent-side process (client, started second).
+## Available examples
 
-The agent side simulates a fast control loop with a tiny first-order plant. The RL side sends alternating targets and receives:
+- [first_order_plant_control/README.md](first_order_plant_control/README.md):
+	lightweight baseline example with a synthetic first-order plant where
+	agent sends observations and RL computes reward/goal.
+- [lunar_lander/README.md](lunar_lander/README.md):
+	Gymnasium + Stable-Baselines3 example where the agent only transports
+	observations/timing and reward/termination are computed on RL side.
 
-- LAT: real duration of the previous action in the agent clock.
-- ATO: agent timestamp when observation was sampled.
-- t_wall: RL local timestamp when response arrives.
-
-## Run
+## Quick run (first_order_plant_control)
 
 From the repository root, open two terminals.
+
+Optional dependencies for the agent-side GUI:
+
+```bash
+pip install -r examples/first_order_plant_control/requirements.txt
+```
 
 Terminal 1 (RL side first):
 
 ```bash
-python examples/rl_side_demo.py --port 49054 --steps 20
+python examples/first_order_plant_control/rl_side_fopcontrol.py --port 49054 --steps 20
 ```
 
 Terminal 2 (agent side second):
 
 ```bash
-python examples/agent_side_demo.py --port 49054
+python examples/first_order_plant_control/agent_side_fopcontrol.py --port 49054
 ```
 
-If you need to set the IP explicitly (for remote runs), use the same interface
-address where the RL side is listening:
+To launch with the graphical monitor:
 
 ```bash
-python examples/agent_side_demo.py --ip <rl_host_ip> --port 49054
+python examples/first_order_plant_control/agent_side_fopcontrol.py --port 49054 --plot
 ```
-
-## Expected output
-
-RL side prints one line per step with LAT/ATO/t_wall and observation values, for example:
-
-```text
-[RL] step=03 action={'target': -0.4, 'gain': 0.25} lat=0.203001s ato=1722080000.501000 t_wall=1722080000.502410 obs={'plant_state': 0.112, 'target': -0.4, 'gain': 0.25} rew=-0.112000
-```
-
-Agent side prints connection lifecycle messages and exits after receiving `FINISH`.

@@ -3,13 +3,12 @@
 """
 SYSTEM FOR DECOUPLING RL SPIN LOOP FROM AGENT SPIN LOOP.
 
-v1.2.0
-
 (c) Juan-Antonio Fernández-Madrigal
 Uncore Team, 2025
 """
 
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 
 try:
 	from rl_spin_decoupler.socketcomms.comms import (
@@ -21,7 +20,12 @@ except ImportError:  # pragma: no cover
 	from socketcomms.comms import BaseCommPoint, ClientCommPoint, ServerCommPoint
 
 
-__version__ = "1.2.0"
+try:
+	# Read version from installed package metadata to avoid hardcoding.
+	__version__ = version("rl-spin-decoupler")
+except PackageNotFoundError:  # pragma: no cover
+	# Fallback for source-only execution when package metadata is unavailable.
+	__version__ = "0+unknown"
 __all__ = [
 	"AgentSide",
 	"BaseCommPoint",

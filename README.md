@@ -29,6 +29,18 @@ The core library uses only Python standard library modules and does not require 
 
 External RL packages (for example Stable-Baselines3 or Gymnasium) are optional and only needed for user-side training scripts built on top of this library.
 
+## Examples
+
+- Main examples index: [examples/README.md](examples/README.md)
+- First-order plant control example: [examples/first_order_plant_control/](examples/first_order_plant_control/README.md)
+- LunarLander SB3 decoupled example: [examples/lunar_lander/](examples/lunar_lander/README.md)
+
+The first-order plant example is the lightweight baseline demo.
+
+The LunarLander example demonstrates the decoupled pattern where the agent
+process only transports observations/timing, while reward and episode
+termination logic are computed on the RL side.
+
 ## Requirements
 
 - Python 3.8 or newer.

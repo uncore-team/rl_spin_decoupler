@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rl-spin-decoupler"
-version = "1.2.0"
+version = "1.2.1"
 description = "Socket-based decoupling utilities for reinforcement learning and agent spin loops."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -31,6 +31,11 @@ dependencies = []
 rl = [
     "stable-baselines3",
     "gymnasium",
+]
+lunar_lander = [
+    "stable-baselines3",
+    "gymnasium",
+    "gymnasium[box2d]",
 ]
 test = [
     "pytest>=8.3",
@@ -59,6 +64,9 @@ rl_spin_decoupler = "."
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=spindecoupler --cov=rl_spin_decoupler.socketcomms --cov-report=term-missing --cov-report=xml --cov-fail-under=95"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = ["examples/*"]
 
 [tool.coverage.report]
 show_missing = true
