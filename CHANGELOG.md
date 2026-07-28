@@ -2,6 +2,16 @@
 
 All notable changes to this repository are documented in this file.
 
+## [1.2.1] - 2026-07-28
+### Added
+- New end-to-end examples under `examples/`, including `first_order_plant_control` and `lunar_lander`, with runnable RL-side and agent-side scripts.
+- API documentation pages under `docs/` (including `docs/api.rst`) and generated HTML documentation in `docs/_build/html/`.
+
+### Changed
+- Bumped package version to `1.2.1` in `pyproject.toml`.
+- Updated exported module `__version__` to resolve dynamically from installed package metadata.
+- In `socketcomms/comms.py`, switched to length-prefixed framing with `sendall` and improved receive robustness by reading header and payload with exact-byte semantics before `pickle.loads`.
+
 ## [1.2.0] - 2026-05-21
 ### Added
 - Installation, requirements, download, and quick-start documentation in `README.md`.

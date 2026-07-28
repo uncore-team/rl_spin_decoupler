@@ -2,7 +2,7 @@
 
 """Executable RL-side demo for rl_spin_decoupler.
 
-Run this process first, then start examples/agent_side_demo.py in another shell.
+Run this process first, then start examples/first_order_plant_control/agent_side_fopcontrol.py in another shell.
 The script drives a short episode and prints LAT/ATO/t_wall per step.
 """
 
@@ -14,7 +14,23 @@ import time
 from spindecoupler import RLSide
 
 
-def run_episode(host_port: int, num_steps: int, timeout: float) -> None:
+def _compute_reward(obs: dict) -> float:
+	"""Compute reward on RL side from observation only."""
+
+	return -abs(float(obs.get("plant_state", 0.0)))
+
+
+def _goal_reached(obs: dict, tolerance: float = 0.05) -> bool:
+	"""Decide RL-side success condition from observation only."""
+
+	return abs(float(obs.get("plant_state", 0.0))) <= tolerance
+
+
+def run_episode(
+	host_port: int,
+	num_steps: int,
+	timeout: float,
+) -> None:
 	"""Run a short RL loop against the agent-side demo.
 
 	Args:
@@ -33,12 +49,14 @@ def run_episode(host_port: int, num_steps: int, timeout: float) -> None:
 			"target": 0.8 if step_idx % 2 == 0 else -0.4,
 			"gain": 0.25,
 		}
-		lat, obs, rew, ato = rl.stepSendActGetObs(action, timeout=timeout)
+		lat, obs, _agent_rew_unused, ato = rl.stepSendActGetObs(action, timeout=timeout)
 		t_wall = time.time()
+		rew = _compute_reward(obs)
+		terminated = _goal_reached(obs)
 		total_rew += rew
 		print(
 			"[RL] step={:02d} action={} lat={:.6f}s ato={:.6f} t_wall={:.6f} "
-			"obs={} rew={:.6f}".format(
+			"obs={} rew_rl={:.6f} terminated={}".format(
 				step_idx,
 				action,
 				lat,
@@ -46,8 +64,12 @@ def run_episode(host_port: int, num_steps: int, timeout: float) -> None:
 				t_wall,
 				obs,
 				rew,
+				terminated,
 			)
 		)
+		if terminated:
+			print("[RL] goal reached -> ending episode")
+			break
 
 	rl.stepExpFinished(timeout=timeout)
 	print(f"[RL] finished -> total_reward={total_rew:.6f}")

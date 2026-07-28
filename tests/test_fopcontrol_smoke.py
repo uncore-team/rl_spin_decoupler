@@ -20,12 +20,12 @@ def _terminate_process(proc: subprocess.Popen) -> None:
 		proc.wait(timeout=2)
 
 
-def test_examples_end_to_end_smoke(free_tcp_port):
-	"""Run the examples as real processes and verify they complete."""
+def test_fopcontrol_example_smoke(free_tcp_port):
+	"""Run first-order control example as real processes and verify completion."""
 
 	repo_root = Path(__file__).resolve().parents[1]
-	rl_script = repo_root / "examples" / "rl_side_demo.py"
-	agent_script = repo_root / "examples" / "agent_side_demo.py"
+	rl_script = repo_root / "examples" / "first_order_plant_control" / "rl_side_fopcontrol.py"
+	agent_script = repo_root / "examples" / "first_order_plant_control" / "agent_side_fopcontrol.py"
 	host_ip = BaseCommPoint.get_ip()
 
 	rl_cmd = [

@@ -1,0 +1,3 @@
+# Optional dependencies for the first_order_plant_control example.
+# Needed only when running agent_side_fopcontrol.py with --plot.
+matplotlib>=3.8
