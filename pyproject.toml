@@ -8,14 +8,15 @@ version = "1.2.1"
 description = "Socket-based decoupling utilities for reinforcement learning and agent spin loops."
 readme = "README.md"
 requires-python = ">=3.8"
-license = { file = "LICENSE" }
 authors = [
-    { name = "Juan-Antonio Fernandez-Madrigal" }
+    { name = "Juan-Antonio Fernandez-Madrigal", email = "jafernandez@uma.es" },
+    { name = "Vicente Arévalo-Espejo", email = "varevalo@uma.es" }
 ]
 keywords = ["reinforcement-learning", "sockets", "agent", "control", "simulation"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -56,6 +57,7 @@ docs = [
 py-modules = ["spindecoupler"]
 packages = ["rl_spin_decoupler", "rl_spin_decoupler.socketcomms"]
 include-package-data = false
+license-files = ["LICENSE*"]
 
 [tool.setuptools.package-dir]
 rl_spin_decoupler = "."
@@ -65,8 +67,8 @@ rl_spin_decoupler = "."
 addopts = "--strict-config --strict-markers --cov=spindecoupler --cov=rl_spin_decoupler.socketcomms --cov-report=term-missing --cov-report=xml --cov-fail-under=95"
 testpaths = ["tests"]
 
-[tool.coverage.run]
-omit = ["examples/*"]
+#[tool.coverage.run]
+#omit = ["examples/*"]
 
 [tool.coverage.report]
 show_missing = true
@@ -76,6 +78,7 @@ exclude_also = [
 ]
 
 [tool.ruff]
+indent-width = 4
 line-length = 88
 target-version = "py38"
 extend-exclude = [
@@ -91,5 +94,5 @@ ignore = ["UP032"]
 
 [tool.ruff.format]
 quote-style = "double"
-indent-style = "tab"
+indent-style = "space"
 docstring-code-format = true
