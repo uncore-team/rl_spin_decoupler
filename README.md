@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/github/license/uncore-team/rl_spin_decoupler)](https://github.com/uncore-team/rl_spin_decoupler/blob/main/LICENSE)
 [![CI](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/ci.yml)
 [![Docs](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml/badge.svg)](https://github.com/uncore-team/rl_spin_decoupler/actions/workflows/docs.yml)
-[![codecov](https://codecov.io/gh/uncore-team/rl_spin_decoupler/graph/badge.svg?token=ENURQ2GN3T)](https://codecov.io/gh/uncore-team/rl_spin_decoupler)
+[![codecov](https://codecov.io/gh/uncore-team/rl_spin_decoupler/branch/main/graph/badge.svg?token=ENURQ2GN3T)](https://codecov.io/gh/uncore-team/rl_spin_decoupler)
 
 Documentation: https://uncore-team.github.io/rl_spin_decoupler/
 
