@@ -1,89 +1,90 @@
 # LunarLander + Stable-Baselines3 with rl_spin_decoupler
 
-Este ejemplo completo y ejecutable demuestra el patron de desacoplo RL/agente
-con Gymnasium `LunarLander-v3` y SB3 (PPO).
+This complete, executable example demonstrates the RL/agent decoupling pattern
+with Gymnasium `LunarLander-v3` and SB3 (PPO).
 
-## Que demuestra
+## What it demonstrates
 
-Arquitectura del ejemplo:
+Example architecture:
 
-- `rl_side_lunarlander.py`: proceso RL. Abre el socket servidor con `RLSide`,
-  entrena PPO y calcula la senal de aprendizaje.
-- `agent_side_lunarlander.py`: proceso agente/entorno. Ejecuta el spin loop,
-  aplica acciones y publica observaciones.
-- `reward.py`: logica de recompensa, `terminated` y `truncated` en el lado RL.
+- `rl_side_lunarlander.py`: RL process. Opens the server socket with `RLSide`,
+  trains PPO, and computes the learning signal.
+- `agent_side_lunarlander.py`: agent/environment process. Runs the spin loop,
+  applies actions, and publishes observations.
+- `reward.py`: reward, `terminated`, and `truncated` logic on the RL side.
 
-Decision central de diseno:
+Central design choice:
 
-- El agente solo transporta observaciones y tiempo de agente (mas LAT).
-- La recompensa y la terminacion se calculan en el lado RL desde la
-  observacion recibida.
+- The agent only transports observations and agent time (plus LAT).
+- Reward and termination are computed on the RL side from the received
+  observation.
 
-Esto es coherente con la filosofia del decoupler: el agente queda agnostico a
-la tarea de aprendizaje, y la logica especifica de RL vive en el proceso RL.
+This is consistent with the decoupler philosophy: the agent stays agnostic to
+the learning task, and the RL-specific logic lives in the RL process.
 
-## Requisitos e instalacion
+## Requirements and installation
 
-Estas dependencias son opcionales y aplican solo a este ejemplo. El core de
-`rl_spin_decoupler` sigue siendo stdlib puro.
+These dependencies are optional and apply only to this example. The core of
+`rl_spin_decoupler` remains pure standard library.
 
-Instalacion:
+Installation:
 
 ```bash
 pip install -r examples/lunar_lander/requirements.txt
 ```
 
-Nota Box2D:
+Box2D note:
 
-`gymnasium[box2d]` puede requerir herramientas de compilacion del sistema (por
-ejemplo `swig`, `build-essential`, `python3-dev` o equivalentes segun distro).
+`gymnasium[box2d]` may require system build tools (for example `swig`,
+`build-essential`, `python3-dev`, or the equivalents for your distribution).
 
-## Ejecucion (orden correcto)
+## Running (correct order)
 
-Abre dos terminales en la raiz del repositorio.
+Open two terminals at the repository root.
 
-1) Terminal 1 (primero, lado RL)
+1) Terminal 1 (first, RL side)
 
 ```bash
 python examples/lunar_lander/rl_side_lunarlander.py
 ```
 
-2) Terminal 2 (despues, lado agente)
+2) Terminal 2 (afterwards, agent side)
 
 ```bash
 python examples/lunar_lander/agent_side_lunarlander.py
 ```
 
-Si quieres ver la parte grafica (ventana de LunarLander), activa render en el
-proceso agente:
+If you want to see the graphical part (the LunarLander window), enable
+rendering in the agent process:
 
 ```bash
 python examples/lunar_lander/agent_side_lunarlander.py --render
 ```
 
-Nota: en entornos sin display (por ejemplo algunos servidores o WSL sin
-servidor X/Wayland), el render puede no estar disponible.
+Note: on environments without a display (for example some servers or WSL
+without an X/Wayland server), rendering may not be available.
 
-Por que este orden:
+Why this order:
 
-`RLSide` abre el socket servidor y bloquea esperando conexion; `AgentSide`
-conecta como cliente.
+`RLSide` opens the server socket and blocks waiting for a connection;
+`AgentSide` connects as a client.
 
-## Que deberias ver
+## What you should see
 
-- Logs de entrenamiento de SB3/PPO en el proceso RL.
-- Metadatos temporales por paso (incluyendo `lat`) dentro de `info`.
-- Si usas `--rollout-steps`, resumen con LAT medio al final del rollout.
+- SB3/PPO training logs in the RL process.
+- Per-step timing metadata (including `lat`) inside `info`.
+- If you use `--rollout-steps`, a summary with the mean LAT at the end of the
+  rollout.
 
-## Alcance del ejemplo
+## Scope of the example
 
-Este ejemplo prioriza ilustrar el patron de desacoplo, no alcanzar SOTA.
+This example prioritizes illustrating the decoupling pattern, not reaching SOTA.
 
-- La recompensa se reconstruye en el lado RL y es una aproximacion didactica.
-- Para resolver LunarLander de forma robusta normalmente se necesitan mas pasos
-  y ajuste de hiperparametros.
+- The reward is reconstructed on the RL side and is a didactic approximation.
+- Robustly solving LunarLander normally requires many more steps and
+  hyperparameter tuning.
 
-## Referencias
+## References
 
-- README principal del proyecto: [../../README.md](../../README.md)
-- API de la libreria: [../../docs/api.rst](../../docs/api.rst)
+- Main project README: [../../README.md](../../README.md)
+- Library API: [../../docs/api.rst](../../docs/api.rst)
