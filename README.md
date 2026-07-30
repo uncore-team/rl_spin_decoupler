@@ -23,6 +23,21 @@ Besides facilitating the link between different processes that carry out RL and 
 
 Although **RL Spin Decoupler** has been implemented and tested with Stable Baselines3 in mind, it is quite general and could be used with other RL libraries: it assumes that there is a `step()` method at each RL step and a `reset()` method when an episode starts. The parameters and results of those methods are the same that Stable Baselines3 uses.
 
+<details>
+<summary><strong>Why RL Spin Decoupler?</strong></summary>
+
+- **Non-invasive integration.** The RL side exposes a Gymnasium-like interface (`reset()` / `step()`), so you keep using your learning stack (policy networks, replay buffers, optimizers) unchanged. The library is validated with Stable-Baselines3 and applies to any RL code that follows the same `step`/`reset` contract.
+
+- **No shared clock, no blocking.** The RL process and the agent's spin loop run as separate OS processes communicating over TCP sockets. The agent polls asynchronously (non-blocking) and keeps running at its own frequency instead of stalling while the policy computes.
+
+- **Timing made observable.** Every step reports the actual **Last Action Time (LAT)** — the wall-clock duration of the executed action — alongside the agent's own timestamp (ATO). This exposes latencies that are invisible in a monolithic setup and lets you build time-aware training loops on top.
+
+- **Separation of concerns.** Control logic and learning logic live in different processes and can be developed and run independently — even on different machines, so a GPU host can drive learning while the control loop stays on embedded hardware.
+
+- **Learn from the examples.** Three self-contained, runnable examples ship with the repo — a first-order plant controller, the Gymnasium LunarLander benchmark, and skeleton templates for both sides — covering the range from a minimal software-only demo to a standard RL benchmark.
+
+</details>
+
 ## Dependencies
 
 The core library uses only Python standard library modules and does not require third-party packages.
