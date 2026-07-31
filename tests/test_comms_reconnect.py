@@ -95,3 +95,33 @@ def test_server_begin_reconnects_when_already_begun(free_tcp_port, force_localho
         server.end()
         thread.join(timeout=2.0)
     assert not errors
+
+
+def test_server_binds_to_all_interfaces_by_default(free_tcp_port, force_localhost):
+    """The server always binds to 0.0.0.0, regardless of get_ip()'s value."""
+
+    server = ServerCommPoint(free_tcp_port)
+    assert server._ipv4 == "0.0.0.0"
+    # get_ip() (mocked to 127.0.0.1 here) is still used for display purposes.
+    assert server._servip == "127.0.0.1"
+
+    errors = []
+
+    def server_worker():
+        try:
+            server.begin(timeoutaccept=5.0)
+        except BaseException as exc:  # pragma: no cover - surfaced via errors list
+            errors.append(exc)
+
+    thread = threading.Thread(target=server_worker, daemon=True)
+    thread.start()
+
+    # The listening socket is on 0.0.0.0, so a loopback client still reaches it.
+    client = _connect_client_with_retry("127.0.0.1", free_tcp_port)
+    try:
+        assert client._begun is True
+    finally:
+        client.end()
+        server.end()
+        thread.join(timeout=2.0)
+    assert not errors

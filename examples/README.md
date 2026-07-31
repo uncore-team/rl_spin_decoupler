@@ -5,12 +5,9 @@ processes (RL side + agent side) synchronized over localhost TCP sockets.
 
 ## Available examples
 
-- [first_order_plant_control/README.md](first_order_plant_control/README.md):
-	lightweight baseline example with a synthetic first-order plant where
-	agent sends observations and RL computes reward/goal.
-- [lunar_lander/README.md](lunar_lander/README.md):
-	Gymnasium + Stable-Baselines3 example where the agent only transports
-	observations/timing and reward/termination are computed on RL side.
+- [first_order_plant_control/README.md](first_order_plant_control/README.md): lightweight baseline example with a synthetic first-order plant where agent sends observations and RL computes reward/goal.
+- [lunar_lander/README.md](lunar_lander/README.md): Gymnasium + Stable-Baselines3 example where the agent only transports observations/timing and reward/termination are computed on RL side.
+- [lunar_lander_container/README.md](lunar_lander_container/README.md): split deployment of the LunarLander example, with the RL side running in an NVIDIA/CUDA container on a remote GPU host and the agent running locally.
 
 ## Quick run (first_order_plant_control)
 
