@@ -66,7 +66,10 @@ class RLSide:
         Args:
                 port: TCP port used by the RL process to listen for the agent
                         connection. Valid ports are restricted by the underlying
-                        transport layer to the range ``20000`` to ``49151``.
+                        transport layer to the range ``20000`` to ``49151``. The
+                        socket always binds to every interface (``0.0.0.0``), so this
+                        works unmodified whether the process runs on a bare host or
+                        inside a container publishing the port to another host.
                 verbose: If ``True``, print lifecycle messages while waiting for the
                         agent and while closing the connection.
 
@@ -76,7 +79,7 @@ class RLSide:
         """
 
         self._verbose = verbose
-        self._rlcomm = ServerCommPoint(port)  # socket not connected yet
+        self._rlcomm = ServerCommPoint(port)  # not connected yet
         # if socket in use, repeatedly wait
         # until free
         if self._verbose:

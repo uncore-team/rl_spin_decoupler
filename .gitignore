@@ -20,3 +20,4 @@ docs/_build/
 dist/
 build/
 site/
+*.zip

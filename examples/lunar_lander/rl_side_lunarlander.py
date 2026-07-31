@@ -188,6 +188,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--debug", action="store_true", help="Enable verbose RL-side logs"
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="Torch device passed to SB3 (auto/cpu/cuda)",
+    )
     return parser.parse_args()
 
 
@@ -232,7 +239,12 @@ def main() -> None:
             env,
             verbose=1,
             seed=args.seed,
+            device=args.device,
         )
+        # Report the effective device so the container demo proves the GPU is
+        # wired up (note: PPO with MlpPolicy on LunarLander barely benefits from
+        # a GPU; this split-host example is a deployment template, not a speedup).
+        print(f"[RL] requested device={args.device}, effective device={model.device}")
         model.learn(total_timesteps=args.timesteps)
 
         model_path = Path(args.model_path)

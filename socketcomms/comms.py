@@ -200,9 +200,16 @@ class ServerCommPoint(BaseCommPoint):
     def __init__(self, po: int):
         """
         Constructor. Server listening at that port.
+
+        The socket always binds to ``0.0.0.0`` (every network interface). This
+        keeps a single, unconditional behaviour that works unmodified whether
+        the process runs directly on a host or inside a container publishing
+        the port to another host (see ``examples/lunar_lander_container``).
+        :meth:`BaseCommPoint.get_ip` is still used to report the outbound
+        address a client should connect to; it does not affect the bind.
         """
         self._servip = BaseCommPoint.get_ip()
-        super().__init__(kind=BaseCommPoint.Kind.SERVER, port=po, ipv4=self._servip)
+        super().__init__(kind=BaseCommPoint.Kind.SERVER, port=po, ipv4="0.0.0.0")
         finish = False
         tries = 0
         while not finish:
