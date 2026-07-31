@@ -1,9 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
+"""Unit tests for the RL-side LunarLander reward logic.
+
+Observations are built here as plain Python lists of floats, which is exactly
+the payload structure the agent transports over the decoupler
+(see ``examples/lunar_lander/agent_side_lunarlander.py``, which sends
+``obs.tolist()``). Keeping these tests dependency-free means the RL-side reward
+logic can be exercised without installing NumPy, matching the "pure-stdlib core"
+philosophy of the library.
+"""
+
 import importlib.util
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 
@@ -20,11 +29,14 @@ def _load_reward_module():
 
 reward = _load_reward_module()
 
+# Observation convention:
+# [x, y, vx, vy, angle, angular_vel, left_leg_contact, right_leg_contact]
+
 
 def test_compute_reward_prefers_better_observation_progress():
-    prev_obs = np.array([0.6, 0.7, 0.8, -0.7, 0.6, 0.5, 0.0, 0.0], dtype=np.float32)
-    obs_bad = np.array([0.7, 0.8, 0.9, -0.8, 0.7, 0.6, 0.0, 0.0], dtype=np.float32)
-    obs_good = np.array([0.2, 0.2, 0.1, -0.1, 0.05, 0.02, 1.0, 1.0], dtype=np.float32)
+    prev_obs = [0.6, 0.7, 0.8, -0.7, 0.6, 0.5, 0.0, 0.0]
+    obs_bad = [0.7, 0.8, 0.9, -0.8, 0.7, 0.6, 0.0, 0.0]
+    obs_good = [0.2, 0.2, 0.1, -0.1, 0.05, 0.02, 1.0, 1.0]
 
     r_bad = reward.compute_reward(obs_bad, action=0, prev_obs=prev_obs, lat=0.05)
     r_good = reward.compute_reward(obs_good, action=0, prev_obs=prev_obs, lat=0.05)
@@ -33,7 +45,7 @@ def test_compute_reward_prefers_better_observation_progress():
 
 
 def test_compute_reward_penalizes_main_engine_use():
-    obs = np.array([0.2, 0.2, 0.1, -0.1, 0.05, 0.02, 0.0, 0.0], dtype=np.float32)
+    obs = [0.2, 0.2, 0.1, -0.1, 0.05, 0.02, 0.0, 0.0]
 
     r_no_engine = reward.compute_reward(obs, action=0, prev_obs=obs)
     r_main_engine = reward.compute_reward(obs, action=2, prev_obs=obs)
@@ -41,17 +53,28 @@ def test_compute_reward_penalizes_main_engine_use():
     assert r_main_engine < r_no_engine
 
 
+def test_compute_reward_accepts_dict_payload():
+    # The reward must also accept the dict-wrapped transport form.
+    obs_list = [0.2, 0.2, 0.1, -0.1, 0.05, 0.02, 0.0, 0.0]
+    obs_dict = {"observation": obs_list}
+
+    assert reward.compute_reward(
+        obs_dict, action=0, prev_obs=obs_dict
+    ) == reward.compute_reward(obs_list, action=0, prev_obs=obs_list)
+
+
+def test_normalize_obs_rejects_wrong_length():
+    with pytest.raises(ValueError, match="length 8"):
+        reward._normalize_obs([0.0, 1.0, 2.0])
+
+
 def test_is_terminated_true_for_stable_landing_signature():
-    landing_obs = np.array(
-        [0.01, 0.02, 0.05, -0.04, 0.03, 0.01, 1.0, 1.0], dtype=np.float32
-    )
+    landing_obs = [0.01, 0.02, 0.05, -0.04, 0.03, 0.01, 1.0, 1.0]
     assert reward.is_terminated(landing_obs)
 
 
 def test_is_terminated_false_for_unstable_non_landing_state():
-    non_terminal_obs = np.array(
-        [0.4, 0.8, 0.6, -0.7, 0.6, 0.3, 0.0, 0.0], dtype=np.float32
-    )
+    non_terminal_obs = [0.4, 0.8, 0.6, -0.7, 0.6, 0.3, 0.0, 0.0]
     assert not reward.is_terminated(non_terminal_obs)
 
 

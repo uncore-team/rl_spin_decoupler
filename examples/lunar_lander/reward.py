@@ -14,31 +14,43 @@ Important:
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Sequence, Union
 
-import numpy as np
+# Defined once for readability and reuse.
+#
+# Observations are transported by the decoupler as plain, picklable Python
+# objects (see ``agent_side_lunarlander.py``, which sends ``obs.tolist()``).
+# This module therefore accepts any length-8 numeric sequence (list, tuple, or
+# NumPy array) or a dict payload carrying that vector under ``observation``. No
+# third-party package is required to evaluate the reward.
+ObsType = Union[Sequence[float], dict]
 
-# Defined once for readability and reuse
-ObsType = np.ndarray | list[float] | tuple[float, ...] | dict[str, Any]
+_OBS_SIZE = 8
 
 
 def _normalize_obs(
     obs: ObsType,
-) -> np.ndarray:
-    """Normalize accepted observation formats into a 1D float32 array of size 8.
+) -> list[float]:
+    """Normalize accepted observation formats into a list of 8 floats.
 
     Accepted forms:
-    - Raw vector-like obs with 8 elements.
+    - Raw vector-like obs with 8 numeric elements (list, tuple, NumPy array...).
     - Dict payload with key ``observation`` containing that vector.
     """
 
     if isinstance(obs, dict):
         obs = obs.get("observation", obs)
 
-    arr = np.asarray(obs, dtype=np.float32)
-    if arr.shape != (8,):
-        raise ValueError(f"Expected observation shape (8,), got {arr.shape}")
-    return arr
+    try:
+        values = [float(v) for v in obs]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Observation is not a numeric vector: {obs!r}") from exc
+
+    if len(values) != _OBS_SIZE:
+        raise ValueError(
+            f"Expected observation of length {_OBS_SIZE}, got {len(values)}"
+        )
+    return values
 
 
 def compute_reward(
