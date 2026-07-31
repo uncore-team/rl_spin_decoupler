@@ -147,7 +147,7 @@ class BaseCommPoint:
         Return non-empty string if any error occurs in the connection.
         """
         if not self._begun:
-            raise RuntimeError("Cannot send data in not-begun commpoint")
+            raise RuntimeError("Cannot read data in not-begun commpoint")
         if timeout <= 0.0:
             timeout = None
         self._sock.settimeout(
@@ -241,7 +241,7 @@ class ServerCommPoint(BaseCommPoint):
         """
         if timeoutaccept <= 0.0:
             raise ValueError("Timeoutaccept must be > 0.0")
-        if not self._begun:
+        if self._begun:
             self.end()
         self._basesock.settimeout(
             timeoutaccept
@@ -295,7 +295,7 @@ class ClientCommPoint(BaseCommPoint):
         """
         Start the work for the client.
         """
-        if not self._begun:
+        if self._begun:
             self.end()
         try:
             self._sock = socket.socket(
@@ -328,8 +328,11 @@ if __name__ == "__main__":
     if len(user_input) == 0:
         comm = ServerCommPoint(49054)
         print("[{}] prepared to begin".format(str(comm)))
-        if not comm.begin(60.0):
-            raise RuntimeError("No one has connected to this server before timeout")
+        err = comm.begin(60.0)
+        if err:
+            raise RuntimeError(
+                "No one has connected to this server before timeout: " + err
+            )
         print("[{}] connected".format(str(comm)))
         ind = 0
         while True:
