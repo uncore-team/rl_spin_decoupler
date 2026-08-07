@@ -9,7 +9,7 @@
 # profile (LAN vs SSH tunnel) is chosen at `docker run` time, not here.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONPATH=/app:${PYTHONPATH}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip \
@@ -21,7 +21,7 @@ COPY . /app
 # PyTorch build matching the CUDA 12.4 base image, then the RL-side deps and the
 # rl_spin_decoupler package itself (whose core is pure standard library).
 RUN pip3 install --no-cache-dir "stable-baselines3>=2.0" "gymnasium>=0.29" \
-    && pip3 install --no-cache-dir .
+    && pip3 install --no-cache-dir -e .
 
 RUN chmod +x /app/examples/lunar_lander_container/entrypoint.sh
 ENTRYPOINT ["/app/examples/lunar_lander_container/entrypoint.sh"]
