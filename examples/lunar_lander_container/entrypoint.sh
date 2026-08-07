@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+export PYTHONPATH="/app:${PYTHONPATH}"
+
 echo "== GPU (nvidia-smi) =="
 nvidia-smi || echo "nvidia-smi not available inside the container"
 

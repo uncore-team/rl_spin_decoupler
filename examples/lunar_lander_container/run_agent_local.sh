@@ -14,4 +14,4 @@ shift || true
 
 exec python examples/lunar_lander/agent_side_lunarlander.py \
     --ip "$AGENT_IP" --port "$PORT" \
-    --rl-step-period 0.08 --control-period 0.01 --timeout 10.0 "$@"
+    --rl-step-period 0.08 --control-period 0.01 --timeout 10.0 --render "$@"
