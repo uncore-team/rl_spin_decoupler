@@ -1,56 +1,45 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""RL-side reward and episode logic for the decoupled LunarLander example.
+"""Agent-side reward and episode logic for the decoupled LunarLander example.
 
-This module intentionally computes reward and done conditions on the RL side,
-using only observation/action data coming from the decoupled transport layer.
+This module computes reward and termination/truncation conditions using only
+observation/action data coming from the decoupled transport layer.
 
 Important:
 - This reward is a didactic approximation inspired by LunarLander shaping.
-- It is sufficient to illustrate decoupling (agent does not send reward), but
-  it does not attempt to exactly replicate Gymnasium's internal reward.
+- It is sufficient to illustrate decoupling (the RL side does not compute its
+  own reward), but it does not attempt to exactly replicate Gymnasium's
+  internal reward.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Sequence, Union
+from typing import Any
 
-# Defined once for readability and reuse.
-#
-# Observations are transported by the decoupler as plain, picklable Python
-# objects (see ``agent_side_lunarlander.py``, which sends ``obs.tolist()``).
-# This module therefore accepts any length-8 numeric sequence (list, tuple, or
-# NumPy array) or a dict payload carrying that vector under ``observation``. No
-# third-party package is required to evaluate the reward.
-ObsType = Union[Sequence[float], dict]
+import numpy as np
 
-_OBS_SIZE = 8
+# Defined once for readability and reuse
+ObsType = np.ndarray | list[float] | tuple[float, ...] | dict[str, Any]
 
 
 def _normalize_obs(
     obs: ObsType,
-) -> list[float]:
-    """Normalize accepted observation formats into a list of 8 floats.
+) -> np.ndarray:
+    """Normalize accepted observation formats into a 1D float32 array of size 8.
 
     Accepted forms:
-    - Raw vector-like obs with 8 numeric elements (list, tuple, NumPy array...).
+    - Raw vector-like obs with 8 elements.
     - Dict payload with key ``observation`` containing that vector.
     """
 
     if isinstance(obs, dict):
         obs = obs.get("observation", obs)
 
-    try:
-        values = [float(v) for v in obs]
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Observation is not a numeric vector: {obs!r}") from exc
-
-    if len(values) != _OBS_SIZE:
-        raise ValueError(
-            f"Expected observation of length {_OBS_SIZE}, got {len(values)}"
-        )
-    return values
+    arr = np.asarray(obs, dtype=np.float32)
+    if arr.shape != (8,):
+        raise ValueError(f"Expected observation shape (8,), got {arr.shape}")
+    return arr
 
 
 def compute_reward(
@@ -59,7 +48,7 @@ def compute_reward(
     prev_obs: ObsType | None = None,
     lat: float | None = None,
 ) -> float:
-    """Compute a didactic RL-side reward from LunarLander observations.
+    """Compute a didactic reward from LunarLander observations.
 
     Observation convention:
     [x, y, vx, vy, angle, angular_vel, left_leg_contact, right_leg_contact]
@@ -118,7 +107,7 @@ def compute_reward(
 def is_terminated(
     obs: ObsType,
 ) -> bool:
-    """Return termination condition decided on RL side from observation data.
+    """Return termination condition decided from observation data.
 
     Termination policy used in this example:
     - Terminate when a stable landing signature is observed: both legs in
@@ -137,7 +126,7 @@ def is_terminated(
 
 
 def is_truncated(step_count: int, max_steps: int) -> bool:
-    """Return whether episode is truncated by RL-side step budget."""
+    """Return whether episode is truncated by step budget."""
 
     if max_steps <= 0:
         raise ValueError("max_steps must be > 0")

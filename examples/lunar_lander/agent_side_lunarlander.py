@@ -7,11 +7,10 @@ faster control loop and exchanges commands/observations with the RL process
 through rl_spin_decoupler.
 
 Design choice for internal Gymnasium termination:
-- The agent remains reward-agnostic and task-agnostic.
 - If LunarLander reaches terminated/truncated internally, the agent keeps that
         state only as local bookkeeping to avoid stepping a finished episode.
-- Episode-level reward/termination decisions remain on RL side from
-        observation traces.
+- Episode-level termination/truncation decisions still remain on RL side, from
+        observation traces (see reward.py: is_terminated/is_truncated).
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ import gymnasium as gym
 import numpy as np
 
 from spindecoupler import AgentSide, BaseCommPoint
+
+from reward import compute_reward
 
 
 class StepState(Enum):
@@ -70,6 +71,7 @@ class LunarLanderAgent:
         self._last_action_start = time.time()
 
         self._obs = np.zeros((8,), dtype=np.float32)
+        self._prev_obs: np.ndarray | None = None
         self._env_done_latched = False
         self._reset_pending_after_publish = False
 
@@ -102,6 +104,10 @@ class LunarLanderAgent:
         _ = info
         self._episode_seed += 1
         self._obs = np.asarray(obs, dtype=np.float32)
+        # The first step of the new episode compares against the post-reset
+        # observation, same as DecoupledLunarLanderEnv.reset() used to (back
+        # when it tracked _prev_obs on RL side).
+        self._prev_obs = self._obs.copy()
         self._env_done_latched = False
         self._reset_pending_after_publish = False
         self._last_action = self._null_action()
@@ -120,7 +126,9 @@ class LunarLanderAgent:
         obs, reward, terminated, truncated, info = self._env.step(
             int(self._last_action)
         )
-        # Reward is intentionally discarded on the agent side.
+        # Gymnasium's own reward is intentionally discarded: this project's
+        # reward signal is reward.py::compute_reward, computed below in
+        # spinloop() at the RL-step boundary, not Gymnasium's native reward.
         _ = reward
         _ = info
         self._obs = np.asarray(obs, dtype=np.float32)
@@ -151,18 +159,30 @@ class LunarLanderAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
+                        reward = compute_reward(
+                            obs=self._obs,
+                            action=self._last_action,
+                            prev_obs=self._prev_obs,
+                            lat=now - self._last_action_start,
+                        )
                         self._comm.stepSendObs(
                             self._build_transport_payload(),
                             agenttime=now,
+                            rew=reward,
                         )
                         if self._debug:
                             print(
                                 "[AGENT] sent transition obs action={} "
-                                "internal_done={}".format(
+                                "reward={:.4f} internal_done={}".format(
                                     self._last_action,
+                                    reward,
                                     self._env_done_latched,
                                 )
                             )
+
+                        # The observation just published becomes the
+                        # "prev_obs" reference for the next reward computation.
+                        self._prev_obs = self._obs.copy()
 
                         if self._reset_pending_after_publish:
                             # Policy: after signaling env_done once, locally

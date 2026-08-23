@@ -17,7 +17,7 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from reward import compute_reward, is_terminated, is_truncated
+from reward import is_terminated, is_truncated
 from stable_baselines3 import PPO
 
 from spindecoupler import RLSide
@@ -27,8 +27,9 @@ class DecoupledLunarLanderEnv(gym.Env):
     """Gymnasium environment backed by rl_spin_decoupler communications.
 
     The RL algorithm interacts with this object as with a standard Gymnasium env.
-    Actions/observations are transported over sockets, but the learning signal
-    (reward/termination/truncation) is generated here on RL side from observation.
+    Actions/observations are transported over sockets. Reward is computed on
+    agent side and transported alongside the observation; termination/
+    truncation are still decided here on RL side from the received observation.
     """
 
     metadata = {"render_modes": []}
@@ -47,7 +48,6 @@ class DecoupledLunarLanderEnv(gym.Env):
         self._comm = RLSide(port, verbose=debug)
         self._finished = False
         self._step_count = 0
-        self._prev_obs: np.ndarray | None = None
 
         # LunarLander-v3 uses 8 floats in observation and 4 discrete actions.
         self.observation_space = spaces.Box(
@@ -78,7 +78,6 @@ class DecoupledLunarLanderEnv(gym.Env):
         payload, ato = self._comm.resetGetObs(timeout=self._timeout)
         obs = self._parse_payload(payload)
         self._step_count = 0
-        self._prev_obs = obs.copy()
 
         info: dict[str, Any] = {}
         info.update({"t_agent": ato, "step_count": self._step_count})
@@ -87,29 +86,24 @@ class DecoupledLunarLanderEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        """Send action, receive observation, and compute RL-side learning signal.
+        """Send action, receive observation + agent-computed reward.
 
         Central design choice:
-        - Agent transports observation/time (and LAT timing).
-        - Reward/terminated/truncated are computed here from received observation.
+        - Agent transports observation/time (and LAT timing) AND the reward,
+          computed on agent side (see reward.py::compute_reward).
+        - Termination/truncated are still decided here from the received
+          observation.
         """
 
-        lat, payload, _agent_rew_unused, ato = self._comm.stepSendActGetObs(
+        lat, payload, agent_reward, ato = self._comm.stepSendActGetObs(
             int(action), timeout=self._timeout
         )
         obs = self._parse_payload(payload)
-
-        reward = compute_reward(
-            obs=obs,
-            action=int(action),
-            prev_obs=self._prev_obs,
-            lat=float(lat),
-        )
+        reward = float(agent_reward)
 
         self._step_count += 1
         terminated = is_terminated(obs)
         truncated = is_truncated(self._step_count, self._max_steps)
-        self._prev_obs = obs.copy()
 
         t_wall = time.time()
         info: dict[str, Any] = {}
@@ -119,19 +113,19 @@ class DecoupledLunarLanderEnv(gym.Env):
                 "t_agent": ato,
                 "t_wall": t_wall,
                 "step_count": self._step_count,
-                "reward_from_rl_logic": True,
+                "reward_from_agent": True,
             }
         )
 
         if self._debug:
             print(
                 "[RL] step action={} lat={:.6f}s ato={:.6f} "
-                "wall={:.6f} rew_rl={:.6f}".format(
+                "wall={:.6f} rew_agent={:.6f}".format(
                     int(action), lat, ato, t_wall, reward
                 )
             )
 
-        return obs, float(reward), terminated, truncated, info
+        return obs, reward, terminated, truncated, info
 
     def close(self):
         """Signal experiment end to agent side once."""
@@ -188,13 +182,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--debug", action="store_true", help="Enable verbose RL-side logs"
     )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="auto",
-        choices=["auto", "cpu", "cuda"],
-        help="Torch device passed to SB3 (auto/cpu/cuda)",
-    )
     return parser.parse_args()
 
 
@@ -239,12 +226,7 @@ def main() -> None:
             env,
             verbose=1,
             seed=args.seed,
-            device=args.device,
         )
-        # Report the effective device so the container demo proves the GPU is
-        # wired up (note: PPO with MlpPolicy on LunarLander barely benefits from
-        # a GPU; this split-host example is a deployment template, not a speedup).
-        print(f"[RL] requested device={args.device}, effective device={model.device}")
         model.learn(total_timesteps=args.timesteps)
 
         model_path = Path(args.model_path)
