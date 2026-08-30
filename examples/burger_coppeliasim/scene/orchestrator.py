@@ -38,7 +38,7 @@ laser_script = None
 obstacles_script = None
 wall_script = None
 
-MIN_TARGET_DIST = 1.5           # Minimum robot-target distance at spawn (m).
+MIN_TARGET_DIST = 0.75           # Minimum robot-target distance at spawn (m).
 TARGET_SAMPLING_ATTEMPTS = 200  # Bounded retries; see _sample_target_position.
 MIN_SPAWN_HALF_EXTENT = 0.05    # Never return a degenerate/negative spawn area.
 
@@ -89,11 +89,21 @@ def _spawn_bounds(radius: float, wall_cfg: Dict[str, Any]) -> Tuple[float, float
     return max(half_x, MIN_SPAWN_HALF_EXTENT), max(half_y, MIN_SPAWN_HALF_EXTENT)
 
 
+def _sample_robot_position(half_x: float, half_y: float) -> Tuple[float, float, float]:
+    """
+    Sample a random robot spawn position (x, y) and yaw angle in the arena.
+    The robot is spawned at least `common.ROBOT_RADIUS` away from the walls.
+    """
+    rx = random.uniform(-half_x, half_x)
+    ry = random.uniform(-half_y, half_y)
+    ryaw = random.uniform(-math.pi, math.pi)
+    return (rx, ry, ryaw)
+
+
 def _sample_target_position(rx: float, ry: float, half_x: float, half_y: float) -> Tuple[float, float]:
     """Sample a target position at least MIN_TARGET_DIST away from (rx, ry).
 
-    Bounded retry loop -- the original implementation used an unbounded
-    `while True`, which can spin forever if MIN_TARGET_DIST doesn't
+    Bounded retry loop, which can spin forever if MIN_TARGET_DIST doesn't
     geometrically fit the configured arena. Falls back to the farthest
     candidate seen across all attempts if none satisfies the constraint.
     """
@@ -118,9 +128,7 @@ def reset_episode() -> List[float]:
     wall_cfg = sim.callScriptFunction("getExternalWallParams", wall_script)
 
     robot_half_x, robot_half_y = _spawn_bounds(common.ROBOT_RADIUS, wall_cfg)
-    rx = random.uniform(-robot_half_x, robot_half_x)
-    ry = random.uniform(-robot_half_y, robot_half_y)
-    ryaw = random.uniform(-math.pi, math.pi)
+    rx, ry, ryaw = _sample_robot_position(robot_half_x, robot_half_y)
     sim.callScriptFunction("reset_pose", burger_script, rx, ry, ryaw)
 
     target_half_x, target_half_y = _spawn_bounds(common.TARGET_RADIUS, wall_cfg)
