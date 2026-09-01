@@ -11,15 +11,18 @@ import numpy as np
 from gymnasium import spaces
 from stable_baselines3 import PPO
 
+from episode_config import LIDAR_MAX_RANGE, NUM_LIDAR_SECTORS, OBS_DIM
+from reward import compute_reward, is_goal_reached, is_truncated
 from spindecoupler import RLSide
 
 # ============================================================================
-# Reward and episode-termination detection (terminated/truncated) are
-# computed in agent-side and arrive over the protocol:
-#   - `rew` -> RLSide.stepSendActGetObs
-#   - `terminated`/`truncated` -> observation payload (see _parse_payload)
-# See agent_side_burger_coppeliasim.py (compute_reward, is_terminated,
-# is_truncated, both imported there from reward.py).
+# Reward and task-level termination are computed HERE, on the RL side:
+#   - reward           -> reward.py::compute_reward
+#   - goal reached     -> reward.py::is_goal_reached (task termination)
+#   - step-budget      -> reward.py::is_truncated (RL-side truncation)
+# The agent transports the PHYSICS termination in the observation payload:
+#   - collision        -> payload["terminated"] (see _parse_payload)
+# The RL side ORs the physics flag with its task/budget decisions.
 # ============================================================================
 
 
@@ -35,19 +38,27 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         self,
         port: int,
         timeout: float = 10.0,
+        max_steps: int = 500,
         debug: bool = False,
     ):
         super().__init__()
         self._timeout = timeout
+        self._max_steps = max_steps
         self._debug = debug
         self._comm = RLSide(port, verbose=debug)
         self._finished = False
         self._step_count = 0
+        self._prev_obs: np.ndarray | None = None
 
-        # Observation (10 dim): 8 LiDAR + distance + angle
+        # Observation (OBS_DIM): NUM_LIDAR_SECTORS LiDAR + distance + angle.
+        # LiDAR entries are metric distances clamped to LIDAR_MAX_RANGE (must
+        # match scene/laser.py::config["max_scan_distance"]).
         self.observation_space = spaces.Box(
-            low=np.array([0.0] * 8 + [0.0, -np.pi], dtype=np.float32),
-            high=np.array([1.0] * 8 + [10.0, np.pi], dtype=np.float32),
+            low=np.array([0.0] * NUM_LIDAR_SECTORS + [0.0, -np.pi], dtype=np.float32),
+            high=np.array(
+                [LIDAR_MAX_RANGE] * NUM_LIDAR_SECTORS + [10.0, np.pi],
+                dtype=np.float32,
+            ),
             dtype=np.float32,
         )
 
@@ -81,6 +92,7 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         payload, ato = self._comm.resetGetObs(timeout=self._timeout)
         obs, _terminated, _truncated = self._parse_payload(payload)
         self._step_count = 0
+        self._prev_obs = obs.copy()
 
         info: dict[str, Any] = {"t_agent": ato, "step_count": self._step_count}
         if self._debug:
@@ -89,13 +101,22 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         action_list = action.tolist()  # Send the continuous action vector.
-        lat, payload, agent_reward, ato = self._comm.stepSendActGetObs(
+        # The transported reward slot is unused: reward is computed here.
+        lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
             action_list, timeout=self._timeout
         )
-        obs, terminated, truncated = self._parse_payload(payload)
-        reward = float(agent_reward)
+        obs, term_phys, trunc_phys = self._parse_payload(payload)
 
-        self._step_count += 1  # Informational only (see info["step_count"]).
+        reward = compute_reward(obs, action, self._prev_obs, float(lat))
+
+        self._step_count += 1
+        # terminated = physics collision (from agent) OR task goal (from obs).
+        terminated = bool(term_phys or is_goal_reached(obs))
+        # truncated = physics truncation (from agent) OR RL-side step budget.
+        truncated = bool(
+            trunc_phys or is_truncated(self._step_count, self._max_steps)
+        )
+        self._prev_obs = obs.copy()
 
         t_wall = time.time()
         info: dict[str, Any] = {
@@ -103,13 +124,14 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
             "t_agent": ato,
             "t_wall": t_wall,
             "step_count": self._step_count,
-            "reward_from_agent": True,
+            "terminated_physics": bool(term_phys),
+            "truncated_physics": bool(trunc_phys),
         }
 
         if self._debug:
             print(
                 f"[RL] step action={action_list} lat={lat:.6f}s "
-                f"ato={ato:.6f} rew_agent={reward:.6f}"
+                f"ato={ato:.6f} rew={reward:.6f} term={terminated} trunc={truncated}"
             )
 
         return obs, reward, terminated, truncated, info
@@ -126,14 +148,24 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
 
 
 def parse_args() -> argparse.Namespace:
-    # Note: the per-episode step budget (--max-steps) is now configured in
-    # agent_side_burger_coppeliasim.py, which is what computes `truncated`.
     parser = argparse.ArgumentParser(description="PPO RL-side CoppeliaSim Burger Demo")
     parser.add_argument("--port", type=int, default=49054, help="TCP port for RL-side server")
     parser.add_argument("--timesteps", type=int, default=100_000, help="Total SB3 timesteps")
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=500,
+        help="Maximum RL steps per episode before truncation (RL-side budget)",
+    )
     parser.add_argument("--timeout", type=float, default=5.0, help="Communication timeout")
     parser.add_argument("--model-path", type=str, default="ppo_coppelia_burger.zip", help="Output model path")
     parser.add_argument("--seed", type=int, default=7, help="Random seed")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Torch device for SB3 (auto|cpu|cuda). Default auto-detects a GPU.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose logs")
     return parser.parse_args()
 
@@ -143,11 +175,20 @@ def main() -> None:
     env = DecoupledCoppeliaBurgerEnv(
         port=args.port,
         timeout=args.timeout,
+        max_steps=args.max_steps,
         debug=args.debug,
     )
     try:
         env.reset(seed=args.seed)
-        model = PPO("MlpPolicy", env, verbose=1, seed=args.seed, learning_rate=3e-4)
+        model = PPO(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            seed=args.seed,
+            learning_rate=3e-4,
+            device=args.device,
+        )
+        print(f"[RL] torch device: {model.device}")
         model.learn(total_timesteps=args.timesteps)
 
         model_path = Path(args.model_path)

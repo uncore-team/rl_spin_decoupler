@@ -141,9 +141,13 @@ the channel inside an SSH tunnel.
 
 Unlike the other examples, this one is **not** exercised in CI (it needs a GPU,
 a container runtime, and two hosts). Validate it manually. To sanity-check the
-logic without any of that, run the plain two-terminal local variant first:
+logic without any of that, install the package and the base example
+dependencies, then run the plain two-terminal local variant first:
 
 ```bash
+pip install -e .
+pip install -r examples/lunar_lander/requirements.txt
+
 # terminal 1
 python examples/lunar_lander/rl_side_lunarlander.py --device cpu --timesteps 2000
 # terminal 2

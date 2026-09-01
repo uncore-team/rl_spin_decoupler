@@ -9,9 +9,8 @@ from typing import List
 import numpy as np
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
+from episode_config import COLLISION_LIDAR_THRESHOLD, NUM_LIDAR_SECTORS, OBS_DIM
 from spindecoupler import AgentSide, BaseCommPoint
-
-from reward import compute_reward, is_terminated, is_truncated
 
 
 class StepState(Enum):
@@ -23,15 +22,22 @@ class StepState(Enum):
 class CoppeliaBurgerAgent:
     """Agent-side process controlling a CoppeliaSim TurtleBot3 Burger.
 
-    Runs a decoupled state machine identical in spirit to the repo's
-    LunarLander example: a fast control loop (`control_period`) keeps the
-    simulator stepping in real time while a slower RL loop
-    (`rl_step_period`) asynchronously decides the next action.
+    Runs a decoupled state machine identical in spirit to the repo's LunarLander
+    example: a fast control loop (`control_period`) keeps the simulator stepping
+    in real time while a slower RL loop (`rl_step_period`) asynchronously decides
+    the next action.
 
-    Reward and episode termination/truncation are computed here, in
-    agent-side (see reward.py), not on the RL side and not by the
-    CoppeliaSim orchestrator script -- that is a deliberate project choice,
-    documented in reward.py and orchestrator.py.
+    Responsibilities of this process:
+    - It computes NO reward: reward and task-level termination live on the RL
+      side (see reward.py).
+    - It DOES detect the PHYSICS termination it is authoritative for -- a
+      collision, from its LiDAR stream (COLLISION_LIDAR_THRESHOLD in
+      episode_config.py) -- and transports it in the payload as ``terminated``.
+      On a real robot this is where battery / e-stop / bumper events would also
+      be raised. The RL side ORs this with the task goal check and its own step
+      budget.
+    - On a physics done, the agent freezes stepping and waits for the RL-driven
+      reset (a single reset), instead of auto-resetting locally.
     """
 
     def __init__(
@@ -41,7 +47,6 @@ class CoppeliaBurgerAgent:
         rl_step_period: float,
         control_period: float,
         timeout: float,
-        max_steps: int = 500,
         sim_host: str = "127.0.0.1",
         sim_port: int = 23000,
         debug: bool = False,
@@ -53,7 +58,6 @@ class CoppeliaBurgerAgent:
         self._timeout = timeout
         self._rl_step_period = rl_step_period
         self._control_period = control_period
-        self._max_steps = max_steps
 
         # 1. ZMQ connection to CoppeliaSim.
         self._client = RemoteAPIClient(host=sim_host, port=sim_port)
@@ -69,10 +73,11 @@ class CoppeliaBurgerAgent:
         self._last_action = self._null_action()
         self._last_action_start = time.time()
 
-        self._obs = np.zeros((10,), dtype=np.float32)
-        self._prev_obs: np.ndarray | None = None
-        self._step_count = 0
-        self._reset_pending_after_publish = False
+        self._obs = np.zeros((OBS_DIM,), dtype=np.float32)
+        # Physics termination latched during the action-repeat window and
+        # reported at the next RL-step boundary; frozen until the RL reset.
+        self._term_latched = False
+        self._frozen = False
 
         self._reset_workspace()
 
@@ -86,6 +91,11 @@ class CoppeliaBurgerAgent:
 
     def _build_observation(self) -> np.ndarray:
         return self._obs
+
+    def _is_collision(self, obs: np.ndarray) -> bool:
+        """Detect a physics collision from the LiDAR sectors of the observation."""
+        lidar_min = float(np.min(obs[0:NUM_LIDAR_SECTORS]))
+        return lidar_min <= COLLISION_LIDAR_THRESHOLD
 
     def _build_transport_payload(
         self, terminated: bool = False, truncated: bool = False
@@ -103,28 +113,28 @@ class CoppeliaBurgerAgent:
 
         raw_obs = self._sim.callScriptFunction("reset_episode", self._orchestrator_handle)
         self._obs = np.asarray(raw_obs, dtype=np.float32)
-        # The first step of the new episode compares against the post-reset
-        # observation, same as DecoupledCoppeliaBurgerEnv.reset() used to.
-        self._prev_obs = self._obs.copy()
-        self._step_count = 0
-
-        self._reset_pending_after_publish = False
+        self._term_latched = False
+        self._frozen = False
         self._last_action = self._null_action()
 
     def _run_control_tick(self) -> None:
         """Run one control tick: apply the current action and read fresh sensors.
 
-        This does NOT decide whether the episode is over -- orchestrator.py's
-        step_episode() only ever returns the raw observation. Termination is
-        computed once per RL step, in spinloop(), from that observation.
+        orchestrator.py's step_episode() only ever returns the raw observation.
+        The physics termination this process owns (a collision) is detected here
+        from that observation; once raised, the finished episode is frozen until
+        the RL-driven reset arrives.
         """
-        if self._reset_pending_after_publish:
+        if self._frozen:
             return
 
         raw_obs = self._sim.callScriptFunction(
             "step_episode", self._orchestrator_handle, self._last_action
         )
         self._obs = np.asarray(raw_obs, dtype=np.float32)
+        if self._is_collision(self._obs):
+            self._term_latched = True
+            self._frozen = True
 
     def spinloop(self) -> None:
         """Run the decoupled state machine, identical in spirit to LunarLander."""
@@ -136,43 +146,19 @@ class CoppeliaBurgerAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
-                        self._step_count += 1
-                        terminated = bool(is_terminated(self._obs))
-                        truncated = is_truncated(self._step_count, self._max_steps)
-                        if terminated:
-                            self._reset_pending_after_publish = True
-
-                        reward = compute_reward(
-                            obs=self._obs,
-                            action=np.asarray(self._last_action, dtype=np.float32),
-                            prev_obs=self._prev_obs,
-                            lat=now - self._last_action_start,
-                        )
+                        # No reward here. Report the physics termination flag;
+                        # stay frozen until the RL side drives the reset.
                         self._comm.stepSendObs(
                             self._build_transport_payload(
-                                terminated=terminated, truncated=truncated
+                                terminated=self._term_latched, truncated=False
                             ),
                             agenttime=now,
-                            rew=reward,
                         )
                         if self._debug:
                             print(
                                 f"[AGENT] Sent transition obs action={self._last_action} "
-                                f"reward={reward:.4f} terminated={terminated} "
-                                f"truncated={truncated} step={self._step_count}"
+                                f"terminated={self._term_latched}"
                             )
-
-                        # The observation just published becomes the "prev_obs"
-                        # reference for the next reward computation.
-                        self._prev_obs = self._obs.copy()
-
-                        if self._reset_pending_after_publish:
-                            self._reset_workspace()
-                            self._last_action_start = now
-                            self._apply_action(self._null_action())
-                            if self._debug:
-                                print("[AGENT] Local auto-reset after termination")
-
                         self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.AFTER_RESET:
@@ -213,10 +199,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rl-step-period", type=float, default=0.08, help="RL action step period")
     parser.add_argument("--control-period", type=float, default=0.01, help="Sim tick period")
     parser.add_argument("--timeout", type=float, default=1.0, help="Timeout readWhatToDo")
-    parser.add_argument(
-        "--max-steps", type=int, default=500,
-        help="Max steps per episode (defines truncation here; no longer exists in rl_side)",
-    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose logs")
     return parser.parse_args()
 
@@ -229,7 +211,6 @@ def main() -> None:
         rl_step_period=args.rl_step_period,
         control_period=args.control_period,
         timeout=args.timeout,
-        max_steps=args.max_steps,
         debug=args.debug,
     )
     try:

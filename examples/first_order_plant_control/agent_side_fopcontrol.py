@@ -2,9 +2,15 @@
 
 """Executable agent-side demo for rl_spin_decoupler.
 
-Run this process after examples/first_order_plant_control/rl_side_fopcontrol.py is
-already listening.
-The agent simulates a fast control loop and reports observations with reward.
+Run this process after examples/first_order_plant_control/rl_side_fopcontrol.py
+is already listening.
+
+The agent simulates a fast control loop and only transports observations and
+timing. It computes no reward: reward and task-level termination live on the RL
+side (see rl_side_fopcontrol.py / reward.py). Every observation is wrapped as
+``{"observation": ..., "terminated": bool, "truncated": bool}`` so the payload
+layout matches the other examples; this synthetic plant never raises a
+physics/hardware termination, so both flags are always ``False``.
 """
 
 from __future__ import annotations
@@ -15,8 +21,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 from spindecoupler import AgentSide, BaseCommPoint
-
-from reward import compute_reward
 
 
 @dataclass
@@ -163,18 +167,32 @@ class SimulatedAgent:
         self._last_action_start = time.time()
         self._current_target = 0.0
         self._current_gain = 0.25
-        self._prev_obs: dict | None = None
         self._tick_counter = 0
         self._plot_hold = plot_hold
         self._visualizer = AgentVisualizer(refresh_every=plot_refresh) if plot else None
 
     def _build_observation(self) -> dict:
-        """Build an observation payload sent to RL."""
+        """Build the raw observation for the plant."""
 
         return {
             "plant_state": self._plant.state,
             "target": self._current_target,
             "gain": self._current_gain,
+        }
+
+    def _build_payload(
+        self, terminated: bool = False, truncated: bool = False
+    ) -> dict:
+        """Wrap the observation with physics/hardware termination flags.
+
+        This synthetic plant never terminates on its own, so the flags stay
+        ``False``; the structure is kept for a uniform payload across examples.
+        """
+
+        return {
+            "observation": self._build_observation(),
+            "terminated": bool(terminated),
+            "truncated": bool(truncated),
         }
 
     def _apply_control_tick(self) -> None:
@@ -209,24 +227,15 @@ class SimulatedAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
-                        obs = self._build_observation()
-                        reward = compute_reward(
-                            obs=obs,
-                            action={
-                                "target": self._current_target,
-                                "gain": self._current_gain,
-                            },
-                            prev_obs=self._prev_obs,
-                            lat=now - self._last_action_start,
+                        # No reward here: the RL side computes it. Physics
+                        # termination flags are always False for this plant.
+                        self._comm.stepSendObs(
+                            self._build_payload(), agenttime=now
                         )
-                        self._comm.stepSendObs(obs, agenttime=now, rew=reward)
-                        self._prev_obs = obs
                         self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.AFTER_RESET:
-                    obs = self._build_observation()
-                    self._comm.resetSendObs(obs, agenttime=now)
-                    self._prev_obs = obs
+                    self._comm.resetSendObs(self._build_payload(), agenttime=now)
                     self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.READY_FOR_RL_COMMAND:

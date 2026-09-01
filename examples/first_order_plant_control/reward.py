@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Agent-side reward and episode logic for the first-order plant example."""
+"""RL-side reward and task-termination logic for the first-order plant example.
+
+Reward and task-level termination are computed on the RL side from the
+observation received over the decoupler transport. The agent stays agnostic to
+the learning task: it only transports observations, timing, and any
+physics/hardware termination flags (this synthetic plant has none, so those
+flags are always ``False``).
+"""
 
 from __future__ import annotations
 
@@ -25,7 +32,7 @@ def compute_reward(
     """Compute reward from the current first-order plant observation.
 
     ``action``, ``prev_obs``, and ``lat`` match the LunarLander reward API so
-    agent-side reward modules have a consistent call contract.
+    the RL-side reward modules share a consistent call contract.
     """
 
     _ = action

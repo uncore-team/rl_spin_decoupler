@@ -27,9 +27,11 @@ the learning task, and the RL-specific logic lives in the RL process.
 These dependencies are optional and apply only to this example. The core of
 `rl_spin_decoupler` remains pure standard library.
 
-Installation:
+Installation (install the package first so the scripts can
+`import spindecoupler`, then the example-only dependencies):
 
 ```bash
+pip install -e .
 pip install -r examples/lunar_lander/requirements.txt
 ```
 
