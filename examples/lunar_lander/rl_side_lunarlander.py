@@ -5,6 +5,10 @@
 Run this process first. It starts the RL-side server and trains PPO on a
 Gymnasium-like environment wrapper that exchanges data with an external
 agent process via sockets.
+
+Reward and task-level termination/truncation are computed HERE, on the RL side,
+from the received observation (see reward.py). The agent only transports the
+observation, timing, and the physics termination flags emitted by Gymnasium.
 """
 
 from __future__ import annotations
@@ -17,9 +21,9 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from reward import is_terminated, is_truncated
 from stable_baselines3 import PPO
 
+from reward import compute_reward, is_terminated, is_truncated
 from spindecoupler import RLSide
 
 
@@ -27,9 +31,11 @@ class DecoupledLunarLanderEnv(gym.Env):
     """Gymnasium environment backed by rl_spin_decoupler communications.
 
     The RL algorithm interacts with this object as with a standard Gymnasium env.
-    Actions/observations are transported over sockets. Reward is computed on
-    agent side and transported alongside the observation; termination/
-    truncation are still decided here on RL side from the received observation.
+    Actions/observations are transported over sockets. Reward is computed HERE on
+    the RL side from the received observation; termination combines the physics
+    flag transported by the agent (crash / out-of-bounds / Gymnasium time limit)
+    with the task-level landing check, and truncation combines that physics flag
+    with the RL-side step budget.
     """
 
     metadata = {"render_modes": []}
@@ -48,6 +54,7 @@ class DecoupledLunarLanderEnv(gym.Env):
         self._comm = RLSide(port, verbose=debug)
         self._finished = False
         self._step_count = 0
+        self._prev_obs: np.ndarray | None = None
 
         # LunarLander-v3 uses 8 floats in observation and 4 discrete actions.
         self.observation_space = spaces.Box(
@@ -55,29 +62,38 @@ class DecoupledLunarLanderEnv(gym.Env):
         )
         self.action_space = spaces.Discrete(4)
 
-    def _parse_payload(self, payload: Any) -> np.ndarray:
-        """Decode agent payload into a fixed-size observation vector."""
+    def _parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+        """Decode the agent payload into (obs, terminated, truncated).
 
-        obs_payload = (
-            payload.get("observation", payload)
-            if isinstance(payload, dict)
-            else payload
-        )
+        The agent wraps every observation as
+        ``{"observation": <vec>, "terminated": bool, "truncated": bool}``.
+        """
+
+        if isinstance(payload, dict):
+            obs_payload = payload.get("observation", payload)
+            terminated = bool(payload.get("terminated", False))
+            truncated = bool(payload.get("truncated", False))
+        else:
+            obs_payload = payload
+            terminated = False
+            truncated = False
+
         obs = np.asarray(obs_payload, dtype=np.float32)
         if obs.shape != self.observation_space.shape:
             raise ValueError(
                 f"Invalid observation shape {obs.shape}; "
                 f"expected {self.observation_space.shape}"
             )
-        return obs
+        return obs, terminated, truncated
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         """Request reset on agent side and return the initial observation."""
 
         super().reset(seed=seed)
         payload, ato = self._comm.resetGetObs(timeout=self._timeout)
-        obs = self._parse_payload(payload)
+        obs, _terminated, _truncated = self._parse_payload(payload)
         self._step_count = 0
+        self._prev_obs = obs.copy()
 
         info: dict[str, Any] = {}
         info.update({"t_agent": ato, "step_count": self._step_count})
@@ -86,24 +102,27 @@ class DecoupledLunarLanderEnv(gym.Env):
         return obs, info
 
     def step(self, action):
-        """Send action, receive observation + agent-computed reward.
+        """Send action, receive observation, compute reward on the RL side.
 
-        Central design choice:
-        - Agent transports observation/time (and LAT timing) AND the reward,
-          computed on agent side (see reward.py::compute_reward).
-        - Termination/truncated are still decided here from the received
-          observation.
+        - Reward is computed HERE via reward.py::compute_reward.
+        - ``terminated`` = physics flag from the agent OR task-level landing.
+        - ``truncated`` = physics flag from the agent OR RL-side step budget.
         """
 
-        lat, payload, agent_reward, ato = self._comm.stepSendActGetObs(
+        # The transported reward slot is unused: reward is computed here.
+        lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
             int(action), timeout=self._timeout
         )
-        obs = self._parse_payload(payload)
-        reward = float(agent_reward)
+        obs, term_phys, trunc_phys = self._parse_payload(payload)
+
+        reward = compute_reward(obs, int(action), self._prev_obs, float(lat))
 
         self._step_count += 1
-        terminated = is_terminated(obs)
-        truncated = is_truncated(self._step_count, self._max_steps)
+        terminated = bool(term_phys or is_terminated(obs))
+        truncated = bool(
+            trunc_phys or is_truncated(self._step_count, self._max_steps)
+        )
+        self._prev_obs = obs.copy()
 
         t_wall = time.time()
         info: dict[str, Any] = {}
@@ -113,15 +132,16 @@ class DecoupledLunarLanderEnv(gym.Env):
                 "t_agent": ato,
                 "t_wall": t_wall,
                 "step_count": self._step_count,
-                "reward_from_agent": True,
+                "terminated_physics": bool(term_phys),
+                "truncated_physics": bool(trunc_phys),
             }
         )
 
         if self._debug:
             print(
                 "[RL] step action={} lat={:.6f}s ato={:.6f} "
-                "wall={:.6f} rew_agent={:.6f}".format(
-                    int(action), lat, ato, t_wall, reward
+                "wall={:.6f} rew={:.6f} term={} trunc={}".format(
+                    int(action), lat, ato, t_wall, reward, terminated, truncated
                 )
             )
 
@@ -172,6 +192,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--seed", type=int, default=7, help="Random seed used by PPO and env reset"
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Torch device for SB3 (auto|cpu|cuda). Default auto-detects a GPU.",
     )
     parser.add_argument(
         "--rollout-steps",
@@ -226,7 +252,9 @@ def main() -> None:
             env,
             verbose=1,
             seed=args.seed,
+            device=args.device,
         )
+        print(f"[RL] torch device: {model.device}")
         model.learn(total_timesteps=args.timesteps)
 
         model_path = Path(args.model_path)

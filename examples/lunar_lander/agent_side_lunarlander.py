@@ -6,11 +6,14 @@ Run this process after rl_side_lunarlander.py is listening. The agent executes a
 faster control loop and exchanges commands/observations with the RL process
 through rl_spin_decoupler.
 
-Design choice for internal Gymnasium termination:
-- If LunarLander reaches terminated/truncated internally, the agent keeps that
-        state only as local bookkeeping to avoid stepping a finished episode.
-- Episode-level termination/truncation decisions still remain on RL side, from
-        observation traces (see reward.py: is_terminated/is_truncated).
+Responsibilities of this process:
+- It computes NO reward: reward and task-level termination live on the RL side.
+- It DOES detect physics termination that only the environment can know
+  (Gymnasium ``terminated``: crash / out-of-bounds; ``truncated``: time limit)
+  and transports those flags in the payload. The RL side combines them with the
+  task-level landing check and its own step budget.
+- On a physics done, the agent freezes stepping and waits for the RL-driven
+  reset (a single reset), instead of auto-resetting locally.
 """
 
 from __future__ import annotations
@@ -23,8 +26,6 @@ import gymnasium as gym
 import numpy as np
 
 from spindecoupler import AgentSide, BaseCommPoint
-
-from reward import compute_reward
 
 
 class StepState(Enum):
@@ -71,9 +72,12 @@ class LunarLanderAgent:
         self._last_action_start = time.time()
 
         self._obs = np.zeros((8,), dtype=np.float32)
-        self._prev_obs: np.ndarray | None = None
-        self._env_done_latched = False
-        self._reset_pending_after_publish = False
+        # Physics termination flags latched during the action-repeat window and
+        # reported at the next RL-step boundary.
+        self._term_latched = False
+        self._trunc_latched = False
+        # While frozen, the finished episode is not stepped; cleared on reset.
+        self._frozen = False
 
         self._reset_workspace()
 
@@ -104,38 +108,45 @@ class LunarLanderAgent:
         _ = info
         self._episode_seed += 1
         self._obs = np.asarray(obs, dtype=np.float32)
-        # The first step of the new episode compares against the post-reset
-        # observation, same as DecoupledLunarLanderEnv.reset() used to (back
-        # when it tracked _prev_obs on RL side).
-        self._prev_obs = self._obs.copy()
-        self._env_done_latched = False
-        self._reset_pending_after_publish = False
+        self._term_latched = False
+        self._trunc_latched = False
+        self._frozen = False
         self._last_action = self._null_action()
 
-    def _build_transport_payload(self) -> list[float]:
-        """Build the transport payload with observation only."""
+    def _build_transport_payload(
+        self, terminated: bool = False, truncated: bool = False
+    ) -> dict[str, object]:
+        """Wrap the observation with the physics termination flags."""
 
-        return self._build_observation().tolist()
+        return {
+            "observation": self._build_observation().tolist(),
+            "terminated": bool(terminated),
+            "truncated": bool(truncated),
+        }
 
     def _run_control_tick(self) -> None:
-        """Advance one simulator tick with the latest action."""
+        """Advance one simulator tick with the latest action.
 
-        if self._reset_pending_after_publish:
+        Gymnasium's own reward is discarded (the RL side computes the learning
+        signal). Gymnasium's ``terminated``/``truncated`` are the physics done
+        this process is authoritative for: they are latched and, once raised,
+        the episode is frozen until the RL-driven reset arrives.
+        """
+
+        if self._frozen:
             return
 
         obs, reward, terminated, truncated, info = self._env.step(
             int(self._last_action)
         )
-        # Gymnasium's own reward is intentionally discarded: this project's
-        # reward signal is reward.py::compute_reward, computed below in
-        # spinloop() at the RL-step boundary, not Gymnasium's native reward.
         _ = reward
         _ = info
         self._obs = np.asarray(obs, dtype=np.float32)
-        self._env_done_latched = bool(terminated or truncated)
         self._try_render_frame()
-        if self._env_done_latched:
-            self._reset_pending_after_publish = True
+        if terminated or truncated:
+            self._term_latched = self._term_latched or bool(terminated)
+            self._trunc_latched = self._trunc_latched or bool(truncated)
+            self._frozen = True
 
     def _try_render_frame(self) -> None:
         """Render a frame when enabled, disabling on runtime display errors."""
@@ -159,40 +170,24 @@ class LunarLanderAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
-                        reward = compute_reward(
-                            obs=self._obs,
-                            action=self._last_action,
-                            prev_obs=self._prev_obs,
-                            lat=now - self._last_action_start,
-                        )
+                        # No reward here. Report the physics flags; stay frozen
+                        # until the RL side drives the reset (single reset).
                         self._comm.stepSendObs(
-                            self._build_transport_payload(),
+                            self._build_transport_payload(
+                                terminated=self._term_latched,
+                                truncated=self._trunc_latched,
+                            ),
                             agenttime=now,
-                            rew=reward,
                         )
                         if self._debug:
                             print(
                                 "[AGENT] sent transition obs action={} "
-                                "reward={:.4f} internal_done={}".format(
+                                "term={} trunc={}".format(
                                     self._last_action,
-                                    reward,
-                                    self._env_done_latched,
+                                    self._term_latched,
+                                    self._trunc_latched,
                                 )
                             )
-
-                        # The observation just published becomes the
-                        # "prev_obs" reference for the next reward computation.
-                        self._prev_obs = self._obs.copy()
-
-                        if self._reset_pending_after_publish:
-                            # Policy: after signaling env_done once, locally
-                            # auto-reset to keep simulator running and avoid
-                            # stepping a done episode.
-                            self._reset_workspace()
-                            self._last_action_start = now
-                            self._apply_action(self._null_action())
-                            if self._debug:
-                                print("[AGENT] local auto-reset after env_done signal")
                         self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.AFTER_RESET:

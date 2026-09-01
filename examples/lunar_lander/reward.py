@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Agent-side reward and episode logic for the decoupled LunarLander example.
+"""RL-side reward and task-termination logic for the decoupled LunarLander example.
 
-This module computes reward and termination/truncation conditions using only
-observation/action data coming from the decoupled transport layer.
+This module runs on the RL side. It computes reward and the task-level
+termination/truncation conditions using only the observation/action data that
+arrive over the decoupled transport. The agent stays agnostic to the learning
+task; it only transports the observation, timing, and the physics termination
+flags emitted by the Gymnasium environment (crash / out-of-bounds / time limit).
 
 Important:
 - This reward is a didactic approximation inspired by LunarLander shaping.
-- It is sufficient to illustrate decoupling (the RL side does not compute its
-  own reward), but it does not attempt to exactly replicate Gymnasium's
-  internal reward.
+- It is sufficient to illustrate decoupling; it does not attempt to exactly
+  replicate Gymnasium's internal reward.
 """
 
 from __future__ import annotations
@@ -107,11 +109,14 @@ def compute_reward(
 def is_terminated(
     obs: ObsType,
 ) -> bool:
-    """Return termination condition decided from observation data.
+    """Return the task-level termination decided from observation data.
 
-    Termination policy used in this example:
+    Task termination policy used in this example:
     - Terminate when a stable landing signature is observed: both legs in
       contact, low speed, and small tilt near ground.
+
+    This is combined on the RL side with the physics termination flag the agent
+    transports (crash / out-of-bounds / Gymnasium time limit).
     """
 
     arr = _normalize_obs(obs)
@@ -126,7 +131,7 @@ def is_terminated(
 
 
 def is_truncated(step_count: int, max_steps: int) -> bool:
-    """Return whether episode is truncated by step budget."""
+    """Return whether the episode is truncated by the RL-side step budget."""
 
     if max_steps <= 0:
         raise ValueError("max_steps must be > 0")

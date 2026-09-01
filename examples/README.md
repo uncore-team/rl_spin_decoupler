@@ -11,7 +11,15 @@ processes (RL side + agent side) synchronized over localhost TCP sockets.
 
 ## Quick run (first_order_plant_control)
 
-From the repository root, open two terminals.
+From the repository root, first install the package so the examples can
+`import spindecoupler` (its core is pure standard library, so this pulls no
+runtime dependencies):
+
+```bash
+pip install -e .
+```
+
+Then open two terminals.
 
 Optional dependencies for the agent-side GUI:
 

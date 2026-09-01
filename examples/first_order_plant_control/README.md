@@ -14,7 +14,14 @@ Design note:
 
 ## Run
 
-From the repository root, use two terminals.
+From the repository root, first install the package (pure standard library
+core, no runtime dependencies) so the scripts can `import spindecoupler`:
+
+```bash
+pip install -e .
+```
+
+Then use two terminals.
 
 Terminal 1:
 
