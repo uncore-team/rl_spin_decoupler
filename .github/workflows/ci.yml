@@ -29,9 +29,9 @@ jobs:
         run: python -m ruff format --check .
 
   # ---------------------------------------------------------------------------
-  # NIVEL 1 — CORE (stdlib pura): matriz amplia, desde 3.8.
-  # Los tests de los ejemplos se excluyen; el gate de cobertura (>=95% sobre
-  # spindecoupler + socketcomms, definido en addopts) se mantiene y pasa al 100%.
+  # LEVEL 1 — CORE (pure stdlib): broad matrix, starting at Python 3.8.
+  # Example tests are excluded; the coverage gate (>=95% for spindecoupler +
+  # socketcomms, configured in addopts) remains and reaches 100%.
   # ---------------------------------------------------------------------------
   test-core:
     name: core / ${{ matrix.os }} / py${{ matrix.python-version }}
@@ -83,11 +83,11 @@ jobs:
           fail_ci_if_error: true
 
   # ---------------------------------------------------------------------------
-  # NIVEL 2 — EJEMPLOS: solo versiones vivas de Python (3.10-3.13).
-  # Justificación: gymnasium >=1.2 exige >=3.10 y box2d 2.3.10 publica wheels
-  # binarios cp310-cp313 para los tres SO; en 3.8/3.9 pip caería a
-  # box2d-py 2.3.5 (sin wheels), que obliga a compilar con SWIG y es frágil.
-  # Sin gate de cobertura: aquí se prueba que los ejemplos funcionan.
+  # LEVEL 2 — EXAMPLES: supported Python versions only (3.10-3.13).
+  # Rationale: the gymnasium[box2d] extra provides Box2D wheels for cp310-cp313.
+  # On 3.8/3.9, pip may fall back to box2d-py 2.3.5 without wheels, requiring
+  # a fragile SWIG build.
+  # No coverage gate: this job verifies that the examples run.
   # ---------------------------------------------------------------------------
   test-examples:
     name: examples / ubuntu / py${{ matrix.python-version }}
