@@ -102,4 +102,5 @@ def test_fopcontrol_example_smoke(free_tcp_port):
 
     assert "[RL] reset" in rl_out
     assert "[RL] step=00" in rl_out
+    assert "rew_agent=" in rl_out
     assert "[RL] finished" in rl_out
