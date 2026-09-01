@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #
-# run_ci.sh — Ejecuta localmente todas las pruebas de .github/workflows/ci.yml
-# para rl_spin_decoupler.
+# run_ci.sh — Runs all checks from .github/workflows/ci.yml locally for
+# rl_spin_decoupler.
 #
-# Reproduce los tres jobs del CI:
+# Reproduces the three CI jobs:
 #   1. lint          -> ruff check  +  ruff format --check
-#   2. test-core     -> pytest SIN los tests de ejemplos (gate de cobertura >=95%)
-#   3. test-examples -> pytest de los tests de ejemplos (SIN gate de cobertura)
+#   2. test-core     -> pytest WITHOUT example tests (coverage gate >=95%)
+#   3. test-examples -> pytest for example tests (WITHOUT coverage gate)
 #
-# Limitación: el CI usa una matriz de SO (ubuntu/macos/windows) y versiones de
-# Python (3.8-3.13). Este script corre con UN solo intérprete (el actual o el
-# indicado con --python / $PYTHON). No sustituye a la matriz, pero valida que
-# todo pasa en tu entorno antes de hacer push.
+# Limitation: CI uses an OS matrix (ubuntu/macos/windows) and Python versions
+# (3.8-3.13). This script runs with ONE interpreter (the current one or the one
+# selected by --python / $PYTHON). It does not replace the matrix, but validates
+# that everything passes in your environment before pushing.
 
 set -uo pipefail
 
-# --------------------------- configuración por defecto ---------------------------
+# --------------------------- default configuration ---------------------------
 PYTHON="${PYTHON:-python3}"
 VENV_DIR=".ci-venv"
 USE_VENV=1
@@ -42,7 +42,7 @@ Opciones:
 EOF
 }
 
-# --------------------------------- argumentos ------------------------------------
+# --------------------------------- arguments ------------------------------------
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-venv)    USE_VENV=0 ;;
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# ----------------------------------- colores -------------------------------------
+# ------------------------------------ colors -------------------------------------
 if [ -t 1 ]; then
   BOLD=$'\033[1m'; RED=$'\033[31m'; GREEN=$'\033[32m'
   YELLOW=$'\033[33m'; BLUE=$'\033[34m'; RESET=$'\033[0m'
@@ -75,7 +75,7 @@ section() { echo ""; echo "${BOLD}${BLUE}==> $1${RESET}"; }
 
 RESULTS=()
 overall=0
-record() {  # $1 = nombre, $2 = código de salida
+record() {  # $1 = name, $2 = exit code
   if [ "$2" -eq 0 ]; then
     RESULTS+=("${GREEN}PASS${RESET}  $1")
   else
@@ -84,14 +84,14 @@ record() {  # $1 = nombre, $2 = código de salida
   fi
 }
 
-# ------------------------- comprobación de raíz del repo -------------------------
+# ------------------------- repository root check -------------------------
 if [ ! -f pyproject.toml ]; then
   echo "${RED}Error:${RESET} no encuentro pyproject.toml." >&2
   echo "Ejecuta el script desde la raíz del repositorio." >&2
   exit 1
 fi
 
-# --------------------------------- intérprete ------------------------------------
+# -------------------------------- interpreter ------------------------------------
 if [ "$USE_VENV" -eq 1 ]; then
   section "Preparando entorno virtual ($VENV_DIR)"
   if [ ! -d "$VENV_DIR" ]; then
@@ -108,11 +108,11 @@ fi
 echo "Intérprete: $("$PY" --version 2>&1)  ->  $PY"
 PYVER="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 
-# --------------------------------- instalación -----------------------------------
+# -------------------------------- installation -----------------------------------
 if [ "$DO_INSTALL" -eq 1 ]; then
   section "Instalando paquete y dependencias"
   "$PY" -m pip install --upgrade pip
-  # .[dev] incluye ruff + pytest + pytest-cov: cubre lint y test-core.
+  # .[dev] includes ruff + pytest + pytest-cov: it covers lint and test-core.
   "$PY" -m pip install -e ".[dev]"
   if [ "$RUN_EXAMPLES" -eq 1 ]; then
     case "$PYVER" in
@@ -127,7 +127,7 @@ if [ "$DO_INSTALL" -eq 1 ]; then
   fi
 fi
 
-# ------------------------------------ lint ---------------------------------------
+# ------------------------------------- lint --------------------------------------
 if [ "$RUN_LINT" -eq 1 ]; then
   section "Lint — ruff check ."
   "$PY" -m ruff check .

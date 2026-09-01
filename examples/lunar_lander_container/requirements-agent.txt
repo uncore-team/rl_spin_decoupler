@@ -1,0 +1,7 @@
+# agent-side dependencies.
+#
+# Stable-Baselines3 is not needed here, since the agent process only runs the simulation
+# and sends the learning signal to the RL process. The Box2D physics engine is needed 
+# here, since LunarLander's simulation runs in the agent process on the local host.
+#
+gymnasium[box2d]>=0.29,<1.1

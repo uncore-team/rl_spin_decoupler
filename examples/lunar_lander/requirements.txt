@@ -1,3 +1,9 @@
-stable-baselines3>=2.0
-gymnasium>=0.29
-gymnasium[box2d]>=0.29
+# Lunar Lander example dependencies.
+#
+# The Box2D physics engine is needed here, since LunarLander's simulation runs in
+# the agent process on the local host. The RL side only builds the SB3 policy
+# and computes the learning signal, so it needs just Stable-Baselines3 + torch
+# (gymnasium is used only for its spaces / Env base class).
+#
+stable-baselines3==2.5.0
+gymnasium[box2d]>=0.29,<1.1
