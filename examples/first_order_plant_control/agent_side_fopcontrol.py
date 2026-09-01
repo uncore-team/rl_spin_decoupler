@@ -4,7 +4,7 @@
 
 Run this process after examples/first_order_plant_control/rl_side_fopcontrol.py is
 already listening.
-The agent simulates a fast control loop and reports observations only.
+The agent simulates a fast control loop and reports observations with reward.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from spindecoupler import AgentSide, BaseCommPoint
+
+from reward import compute_reward
 
 
 @dataclass
@@ -161,6 +163,7 @@ class SimulatedAgent:
         self._last_action_start = time.time()
         self._current_target = 0.0
         self._current_gain = 0.25
+        self._prev_obs: dict | None = None
         self._tick_counter = 0
         self._plot_hold = plot_hold
         self._visualizer = AgentVisualizer(refresh_every=plot_refresh) if plot else None
@@ -207,11 +210,23 @@ class SimulatedAgent:
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
                         obs = self._build_observation()
-                        self._comm.stepSendObs(obs, agenttime=now)
+                        reward = compute_reward(
+                            obs=obs,
+                            action={
+                                "target": self._current_target,
+                                "gain": self._current_gain,
+                            },
+                            prev_obs=self._prev_obs,
+                            lat=now - self._last_action_start,
+                        )
+                        self._comm.stepSendObs(obs, agenttime=now, rew=reward)
+                        self._prev_obs = obs
                         self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.AFTER_RESET:
-                    self._comm.resetSendObs(self._build_observation(), agenttime=now)
+                    obs = self._build_observation()
+                    self._comm.resetSendObs(obs, agenttime=now)
+                    self._prev_obs = obs
                     self._state = StepState.READY_FOR_RL_COMMAND
 
                 elif self._state == StepState.READY_FOR_RL_COMMAND:

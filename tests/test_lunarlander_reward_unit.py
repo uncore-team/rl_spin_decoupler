@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Unit tests for the RL-side LunarLander reward logic.
+"""Unit tests for the agent-side LunarLander reward logic.
 
 Observations are built here as plain Python lists of floats, which is exactly
 the payload structure the agent transports over the decoupler
 (see ``examples/lunar_lander/agent_side_lunarlander.py``, which sends
-``obs.tolist()``). Keeping these tests dependency-free means the RL-side reward
+``obs.tolist()``). Keeping these tests dependency-free means the agent-side reward
 logic can be exercised without installing NumPy, matching the "pure-stdlib core"
 philosophy of the library.
 """
@@ -64,7 +64,7 @@ def test_compute_reward_accepts_dict_payload():
 
 
 def test_normalize_obs_rejects_wrong_length():
-    with pytest.raises(ValueError, match="length 8"):
+    with pytest.raises(ValueError, match=r"Expected observation shape \(8,\)"):
         reward._normalize_obs([0.0, 1.0, 2.0])
 
 

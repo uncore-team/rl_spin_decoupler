@@ -81,6 +81,7 @@ def test_lunarlander_example_smoke(free_tcp_port):
         "256",
         "--timeout",
         "5.0",
+        "--debug",
     ]
     agent_cmd = [
         sys.executable,
@@ -95,6 +96,7 @@ def test_lunarlander_example_smoke(free_tcp_port):
         "0.001",
         "--timeout",
         "5.0",
+        "--debug",
     ]
 
     rl_proc = subprocess.Popen(
@@ -112,6 +114,9 @@ def test_lunarlander_example_smoke(free_tcp_port):
 
     assert agent.returncode == 0, agent.stdout + "\n" + agent.stderr
     assert "finish command received" in agent.stdout.lower()
+    assert "sent transition obs action=" in agent.stdout.lower()
+    assert "reward=" in agent.stdout.lower()
 
     assert "training finished" in rl_out.lower()
     assert "model saved" in rl_out.lower()
+    assert "rew_agent=" in rl_out.lower()

@@ -12,19 +12,8 @@ from __future__ import annotations
 import argparse
 import time
 
+from reward import is_terminated
 from spindecoupler import RLSide
-
-
-def _compute_reward(obs: dict) -> float:
-    """Compute reward on RL side from observation only."""
-
-    return -abs(float(obs.get("plant_state", 0.0)))
-
-
-def _goal_reached(obs: dict, tolerance: float = 0.05) -> bool:
-    """Decide RL-side success condition from observation only."""
-
-    return abs(float(obs.get("plant_state", 0.0))) <= tolerance
 
 
 def run_episode(
@@ -50,14 +39,14 @@ def run_episode(
             "target": 0.8 if step_idx % 2 == 0 else -0.4,
             "gain": 0.25,
         }
-        lat, obs, _agent_rew_unused, ato = rl.stepSendActGetObs(action, timeout=timeout)
+        lat, obs, agent_reward, ato = rl.stepSendActGetObs(action, timeout=timeout)
         t_wall = time.time()
-        rew = _compute_reward(obs)
-        terminated = _goal_reached(obs)
+        rew = float(agent_reward)
+        terminated = is_terminated(obs)
         total_rew += rew
         print(
             "[RL] step={:02d} action={} lat={:.6f}s ato={:.6f} t_wall={:.6f} "
-            "obs={} rew_rl={:.6f} terminated={}".format(
+            "obs={} rew_agent={:.6f} terminated={}".format(
                 step_idx,
                 action,
                 lat,
