@@ -1,90 +1,70 @@
 # LunarLander + Stable-Baselines3 with rl_spin_decoupler
 
-This complete, executable example demonstrates the RL/agent decoupling pattern
-with Gymnasium `LunarLander-v3` and SB3 (PPO).
+This complete, executable example runs Gymnasium `LunarLander-v3` and SB3 PPO
+on one machine, with the RL process and the environment agent in separate
+processes.
 
 ## What it demonstrates
 
-Example architecture:
+- `rl_side_lunarlander.py` opens the `RLSide` server socket, trains PPO, and 
+  computes reward plus task-level termination and truncation.
+- `agent_side_lunarlander.py` runs the spin loop and LunarLander physics,
+  applies actions, and publishes observations and timing.
+- `reward.py` keeps learning-task logic on the RL side. The agent does not
+  compute reward; it only reports Gymnasium physics termination flags.
 
-- `rl_side_lunarlander.py`: RL process. Opens the server socket with `RLSide`,
-  trains PPO, and computes the learning signal.
-- `agent_side_lunarlander.py`: agent/environment process. Runs the spin loop,
-  applies actions, and publishes observations.
-- `reward.py`: reward, `terminated`, and `truncated` logic on the RL side.
-
-Central design choice:
-
-- The agent only transports observations and agent time (plus LAT).
-- Reward and termination are computed on the RL side from the received
-  observation.
-
-This is consistent with the decoupler philosophy: the agent stays agnostic to
-the learning task, and the RL-specific logic lives in the RL process.
+This separation keeps the agent independent of the learning objective while
+the RL side owns the policy and learning signal.
 
 ## Requirements and installation
 
-These dependencies are optional and apply only to this example. The core of
-`rl_spin_decoupler` remains pure standard library.
-
-Installation (install the package first so the scripts can
-`import spindecoupler`, then the example-only dependencies):
+Install the package first, then the dependencies specific to this example:
 
 ```bash
 pip install -e .
 pip install -r examples/lunar_lander/requirements.txt
 ```
 
-Box2D note:
+`gymnasium[box2d]` may require system build tools such as `swig`,
+`build-essential`, and `python3-dev`, or their equivalents for your
+distribution.
 
-`gymnasium[box2d]` may require system build tools (for example `swig`,
-`build-essential`, `python3-dev`, or the equivalents for your distribution).
+The RL script uses PyTorch's automatic device selection by default. To force
+CPU training, run it with `--device cpu`. For GPU training, install a PyTorch
+wheel compatible with the local NVIDIA driver.
 
 ## Running (correct order)
 
-Open two terminals at the repository root.
-
-1) Terminal 1 (first, RL side)
+From the repository root, open two terminals and start the RL side first:
 
 ```bash
 python examples/lunar_lander/rl_side_lunarlander.py
 ```
 
-2) Terminal 2 (afterwards, agent side)
+Then start the agent side:
 
 ```bash
 python examples/lunar_lander/agent_side_lunarlander.py
 ```
 
-If you want to see the graphical part (the LunarLander window), enable
-rendering in the agent process:
-
-```bash
-python examples/lunar_lander/agent_side_lunarlander.py --render
-```
-
-Note: on environments without a display (for example some servers or WSL
-without an X/Wayland server), rendering may not be available.
-
-Why this order:
-
-`RLSide` opens the server socket and blocks waiting for a connection;
-`AgentSide` connects as a client.
+To display the LunarLander window, add `--render` to the agent command.
+Rendering may not be available on a headless host or WSL without an X/Wayland
+server. `RLSide` must start first because it listens for the agent connection.
 
 ## What you should see
 
 - SB3/PPO training logs in the RL process.
-- Per-step timing metadata (including `lat`) inside `info`.
-- If you use `--rollout-steps`, a summary with the mean LAT at the end of the
-  rollout.
+- Per-step timing metadata, including `lat`, in the environment `info` dict.
+- A mean-LAT summary after a rollout when `--rollout-steps` is used.
+- The LunarLander window when the agent runs with `--render` and a display is
+  available.
 
 ## Scope of the example
 
-This example prioritizes illustrating the decoupling pattern, not reaching SOTA.
-
-- The reward is reconstructed on the RL side and is a didactic approximation.
-- Robustly solving LunarLander normally requires many more steps and
-  hyperparameter tuning.
+This example demonstrates process decoupling, rather than optimizing a
+LunarLander policy. Its RL-side reward reconstruction is didactic; reliably
+solving LunarLander generally needs more training steps and hyperparameter
+tuning.
 
 ## References
 

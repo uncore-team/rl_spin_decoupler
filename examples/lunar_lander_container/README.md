@@ -1,160 +1,108 @@
-# LunarLander split deployment: RL on a remote GPU container, agent local
+# LunarLander split deployment: RL in a remote GPU container, agent local
 
-This example runs the same decoupled LunarLander demo as
-[`../lunar_lander/`](../lunar_lander/README.md), but split across two machines:
+This example runs the decoupled LunarLander demo across two machines. The RL
+side runs in an NVIDIA/CUDA container on a remote Ubuntu 22.04 GPU host, while
+the local agent runs Gymnasium `LunarLander-v3` and its Box2D physics.
 
-- The RL side (`RLSide`, the socket **server**) runs in an NVIDIA/CUDA
-  container on a **remote** Ubuntu 22.04 host with a GPU. It trains PPO and
-  computes the learning signal.
-- The agent side (`AgentSide`, the socket **client**) runs on your **local**
-  Ubuntu 22.04 host. It executes the Gymnasium `LunarLander-v3` environment
-  (Box2D physics, optional rendering) and only transports observations/timing.
+## What it demonstrates
 
-Because `RLSide` is the server, the **remote host listens** and the **local
-host initiates** the connection. That direction drives the firewall / port /
-tunnel setup below.
+- `run_rl_container.sh` starts the remote `RLSide` server in a GPU-enabled
+  Docker container, trains PPO, and computes the learning signal.
+- `run_agent_local.sh` starts the local agent, which owns the simulation and
+  transports observations, physics flags, and timing.
+- Profile A connects directly on a shared LAN; Profile B publishes only the
+  remote loopback port and forwards it over SSH with `tunnel.sh`.
 
-## Dependencies: what runs where
+`RLSide` is the socket server, so the remote host listens and the local agent
+initiates the connection.
 
-The RL container needs only Stable-Baselines3 + PyTorch (and gymnasium for its
-spaces/`Env` base class). LunarLander's Box2D physics runs in the agent process
-on the local host, so the container needs no `swig` / `gymnasium[box2d]`. This
-keeps the image lean.
+## Requirements and installation
 
-## About the GPU
-
-PPO with an `MlpPolicy` over an 8-dimensional observation is a tiny model, and
-a GPU barely accelerates it (the host/device transfer for small batches often
-cancels any gain). This example is a **deployment template** that demonstrates
-the full stack — NVIDIA Container Toolkit, a CUDA-enabled PyTorch in a
-container, and cross-host decoupling — which generalizes to GPU-hungry
-workloads (e.g. SAC / CNN policies). The RL script prints its effective torch
-device on startup so you can confirm the GPU is wired up.
-
-## Prerequisites (remote host, once)
-
-The host NVIDIA driver must be recent enough for CUDA 12.4 (driver >= ~550),
-Docker must be installed, and the NVIDIA Container Toolkit configured:
+The remote host needs a recent NVIDIA driver for CUDA 12.4 (approximately
+550+), Docker, and the NVIDIA Container Toolkit. Configure the runtime once:
 
 ```bash
-nvidia-smi   # host driver works?
-
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
-
-# verify GPU visibility inside a container:
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
 docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 ```
 
-## Two network profiles (one image)
+On the local host, install the package and the agent dependencies:
 
-The container image is network-agnostic; the profile is chosen at run time.
+```bash
+pip install -e .
+pip install -r examples/lunar_lander_container/requirements-agent.txt
+```
 
-### Profile A — same LAN (default, no library change required in practice)
+The container installs the RL-side package and dependencies itself. It does
+not need `gymnasium[box2d]` because the local agent runs the simulation.
 
-The container shares the host network stack (`--network host`) and the agent
-connects to the remote host's LAN IP.
+## Running (correct order)
 
-Remote host (from the repository root):
+Start the remote RL container before the local agent. It waits up to 60
+seconds for the agent connection.
+
+### Profile A: same LAN
+
+On the remote host, from the repository root:
 
 ```bash
 ./examples/lunar_lander_container/run_rl_container.sh A --timesteps 20000
 ```
 
-Open the port to your local machine on the remote host, e.g. with ufw:
-
-```bash
-sudo ufw allow from <LOCAL_IP> to any port 49054 proto tcp
-```
-
-Local host (from the repository root):
+Allow TCP port `49054` from the local machine in the remote firewall. Then on
+the local host run:
 
 ```bash
 ./examples/lunar_lander_container/run_agent_local.sh <REMOTE_LAN_IP>
 ```
 
-Note: `--network host` shares the host's network namespace (no network
-isolation for the container, and `--port` occupies that port directly on the
-remote host). That is normal and appropriate for a dedicated compute box you
-control.
+This profile uses Docker host networking, so the container listens directly on
+the remote host's LAN interface.
 
-### Profile B — across networks, via SSH tunnel (recommended when not on one LAN)
+### Profile B: SSH tunnel
 
-The container publishes the server only on the remote loopback, and an SSH
-local-forward carries the connection. Nothing is exposed publicly.
-
-Remote host:
+On the remote host:
 
 ```bash
 ./examples/lunar_lander_container/run_rl_container.sh B --timesteps 20000
 ```
 
-Local host, in one terminal (open the tunnel):
+On the local host, open the tunnel in one terminal:
 
 ```bash
 ./examples/lunar_lander_container/tunnel.sh user@remote-host
 ```
 
-Local host, in another terminal (agent connects to 127.0.0.1 by default):
+Then start the agent in a second terminal:
 
 ```bash
 ./examples/lunar_lander_container/run_agent_local.sh
 ```
 
-`RLSide` / `ServerCommPoint` always bind to `0.0.0.0` (every interface) by
-design, so both profiles work unmodified: this is what lets the server accept
-the container's NAT-forwarded connection in Profile B and the direct LAN
-connection in Profile A, with no configuration needed.
+Profile B publishes the container server only on remote loopback, so nothing
+is exposed publicly. `PORT` defaults to `49054`, `DEVICE` defaults to `cuda`,
+and arguments after `A` or `B` are forwarded to `rl_side_lunarlander.py`.
 
-## Start order and connection window
+## What you should see
 
-Start the RL container first: `RLSide` blocks on `accept()` for up to 60
-seconds waiting for the agent. Then (open the tunnel if using Profile B and)
-start the agent. The agent client raises on a refused connection; the wrapper
-scripts run a single attempt, so if you miss the window, just relaunch the
-agent.
+- The remote container reports `nvidia-smi`, the effective PyTorch device, and
+  SB3/PPO training logs.
+- The local agent runs LunarLander and can render with `--render`.
+- Per-step `lat`, `ato`, and remote `t_wall` values are available in `info`.
 
-Use `--rl-step-period 0.08` (as the wrapper does) rather than the tiny values
-from the local smoke test, to leave room for real network round-trip time.
+## Scope of the example
 
-## Timing across two machines
-
-This is the first example that genuinely exercises the two cross-host clock
-domains the library was built to preserve. `t_wall` comes from the RL (remote)
-clock and `ATO` from the agent (local) clock; the two machines are not
-synchronized, so `t_wall - ATO` mixes clock offset with latency. To analyze
-timing seriously, enable NTP/chrony on both hosts and measure round-trip time
-separately. Per-step `lat` / `ato` / `t_wall` are available in the `info` dict.
-
-## Security note
-
-The transport uses `pickle` over the socket, so it must only be used between
-trusted endpoints. Both ends here are your own machines, and Profile B keeps
-the channel inside an SSH tunnel.
-
-## Scope and CI
-
-Unlike the other examples, this one is **not** exercised in CI (it needs a GPU,
-a container runtime, and two hosts). Validate it manually. To sanity-check the
-logic without any of that, install the package and the base example
-dependencies, then run the plain two-terminal local variant first:
-
-```bash
-pip install -e .
-pip install -r examples/lunar_lander/requirements.txt
-
-# terminal 1
-python examples/lunar_lander/rl_side_lunarlander.py --device cpu --timesteps 2000
-# terminal 2
-python examples/lunar_lander/agent_side_lunarlander.py
-```
+This is a manual deployment template, not a CI-tested workflow. PPO with
+LunarLander's small MLP benefits little from a GPU; the example demonstrates a
+GPU-capable, cross-host architecture that is more useful for larger policies.
+Remote `t_wall` and local `ATO` are separate clock domains, so synchronize
+hosts with NTP or chrony and measure round-trip time separately for timing
+analysis. The transport uses `pickle`, so connect only trusted endpoints.
 
 ## References
 
 - Base LunarLander example: [../lunar_lander/README.md](../lunar_lander/README.md)
+- Bare-host deployment: [../lunar_lander_remote/README.md](../lunar_lander_remote/README.md)
 - Main project README: [../../README.md](../../README.md)
