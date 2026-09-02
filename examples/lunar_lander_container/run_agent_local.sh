@@ -3,9 +3,11 @@ set -e
 # Run the agent (client) on the LOCAL host, after the RL container is listening.
 #
 # Usage:
-#   Profile A (same LAN):  ./run_agent_local.sh <REMOTE_LAN_IP>
-#   Profile B (SSH tunnel): ./run_agent_local.sh          # defaults to 127.0.0.1
-# Extra args are forwarded to the agent script, e.g. --render.
+#   Profile A (same LAN):       ./run_agent_local.sh <REMOTE_LAN_IP>
+#   Profile B (SSH tunnel):     ./run_agent_local.sh    # defaults to 127.0.0.1
+#
+# Extra args are forwarded to the agent script, e.g.:
+#   ./run_agent_local.sh --debug
 #
 # Env overrides: PORT (default 49054).
 AGENT_IP="${1:-127.0.0.1}"

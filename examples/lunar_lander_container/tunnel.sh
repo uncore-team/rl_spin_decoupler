@@ -5,6 +5,7 @@ set -e
 #
 # Usage:
 #   ./tunnel.sh user@remote-host [PORT]
+#
 # Then run the agent against 127.0.0.1 (the default of run_agent_local.sh).
 REMOTE="${1:?usage: ./tunnel.sh user@remote-host [port]}"
 PORT="${2:-49054}"

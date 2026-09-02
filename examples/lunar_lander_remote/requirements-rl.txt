@@ -1,0 +1,3 @@
+# RL-side dependencies. LunarLander's Box2D simulation runs on the local agent.
+stable-baselines3==2.5.0
+gymnasium>=0.29,<1.1

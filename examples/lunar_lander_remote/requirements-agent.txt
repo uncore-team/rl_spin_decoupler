@@ -1,0 +1,2 @@
+# Agent-side dependencies. The local agent runs LunarLander's Box2D simulation.
+gymnasium[box2d]>=0.29,<1.1
