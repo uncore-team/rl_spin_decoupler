@@ -49,6 +49,7 @@ def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     sim.setObjectParent(disk, self_handle, False)
     sim.setObjectPosition(disk, self_handle, [0.0, 0.0, h / 2.0])
     sim.setObjectInt32Param(disk, sim.shapeintparam_respondable, 0)  # non-collidable, passive
+    sim.setObjectInt32Param(disk, sim.shapeintparam_static, 1)
     sim.setObjectColor(disk, 0, sim.colorcomponent_ambient_diffuse, [0.0, 0.0, 1.0])
 
     prop = (sim.getObjectProperty(disk) | sim.objectproperty_ignoreviewfitting) & (~sim.objectproperty_selectable)

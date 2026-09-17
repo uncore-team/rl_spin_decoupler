@@ -1,10 +1,14 @@
 # Improvements and extensions over the JA2026 preliminary version
 
-A preliminary version of the method underlying this package, together with an early validation on a robotic manipulator, was presented at the Jornadas de Automática 2026 (Bañuls-Arias et al., 2026). The released software package (v1.2.1) extends that work with:
+A preliminary version of the method underlying this package, together with an early 
+validation on a robotic manipulator, was presented at the Jornadas de Automática 2026 
+(Bañuls-Arias et al., 2026). The released software package (v1.2.1) extends that work 
+with:
 
 1. **Consolidated two-sided architecture.** Stable `RLSide` (server) / `AgentSide`
    (client) split over TCP sockets, with a documented client state machine
-   (`RESET_SEND_OBS`, `REC_ACTION_SEND_OBS`, `FINISH`) and non-blocking polling via `select`.
+   (`RESET_SEND_OBS`, `REC_ACTION_SEND_OBS`, `FINISH`) and non-blocking polling via 
+   `select`.
 2. **Public, documented API with temporal instrumentation.** First-class reporting of
    the Last Action Time (LAT) and Agent Time of Observation (ATO) in the communication
    protocol, enabling time-aware (augmented) MDP formulations.

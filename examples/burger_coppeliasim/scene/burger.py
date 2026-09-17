@@ -88,6 +88,10 @@ def init(simulation: Any) -> None:
     State.motor_left = sim.getObject("/wheel_left_joint")
     State.motor_right = sim.getObject("/wheel_right_joint")
 
+    # caster_visual = sim.getObject("/caster_back_link_visual")
+    # sim.setObjectInt32Param(caster_visual, sim.shapeintparam_static, 1)
+    # sim.setObjectInt32Param(caster_visual, sim.shapeintparam_respondable, 0)
+
     State.initial_pos = sim.getObjectPosition(State.robot, sim.handle_world)
     State.initial_quat = sim.getObjectQuaternion(State.robot, sim.handle_world)
 

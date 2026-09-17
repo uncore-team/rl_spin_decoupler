@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 import argparse
-import time
 from enum import Enum
-from typing import List
-
 import numpy as np
+import os
+from pathlib import Path
+import time
+from typing import List, Optional
+
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 from episode_config import COLLISION_LIDAR_THRESHOLD, NUM_LIDAR_SECTORS, OBS_DIM
 from spindecoupler import AgentSide, BaseCommPoint
+
+# Scene shipped alongside this script (burger_coppeliasim/scene/scene.ttt).
+# Resolved relative to this file so the agent finds it regardless of the
+# process's current working directory.
+DEFAULT_SCENE_PATH = str(Path(__file__).resolve().parent / "scene" / "scene.ttt")
 
 
 class StepState(Enum):
@@ -49,6 +56,7 @@ class CoppeliaBurgerAgent:
         timeout: float,
         sim_host: str = "127.0.0.1",
         sim_port: int = 23000,
+        scene_path: Optional[str] = None,
         debug: bool = False,
     ):
         if rl_step_period <= control_period:
@@ -62,11 +70,28 @@ class CoppeliaBurgerAgent:
         # 1. ZMQ connection to CoppeliaSim.
         self._client = RemoteAPIClient(host=sim_host, port=sim_port)
         self._sim = self._client.require("sim")
-        self._orchestrator_handle = self._sim.getScript(
-            self._sim.scripttype_childscript, self._sim.getObject("/Orchestrator")
-        )
 
-        # 2. Decoupling socket (AgentSide).
+        # 2. Load the scene and enable real-time stepping BEFORE resolving any
+        #    scene object (getObject("/Orchestrator") below would fail on an
+        #    empty/wrong scene).
+        self._load_scene(scene_path)
+        orchestrator_object = self._sim.getObject("/Orchestrator")
+        if orchestrator_object <= 0:
+            raise RuntimeError(
+                "The loaded scene does not contain an '/Orchestrator' object. "
+                "Attach the Orchestrator child script to an object with that "
+                "alias and save scene/scene.ttt."
+            )
+        self._orchestrator_handle = self._sim.getScript(
+            self._sim.scripttype_childscript, orchestrator_object
+        )
+        if self._orchestrator_handle <= 0:
+            raise RuntimeError(
+                "The '/Orchestrator' object has no child script. "
+                "Attach the Orchestrator script and save scene/scene.ttt."
+            )
+
+        # 3. Decoupling socket (AgentSide).
         self._comm = AgentSide(ip, port, verbose=debug)
 
         self._state = StepState.READY_FOR_RL_COMMAND
@@ -80,6 +105,28 @@ class CoppeliaBurgerAgent:
         self._frozen = False
 
         self._reset_workspace()
+
+    def _load_scene(self, scene_path: Optional[str]) -> None:
+        """Stop any running simulation, load `scene_path`, and enable real-time mode.
+
+        Real-time mode makes CoppeliaSim's internal clock track the wall
+        clock as closely as it can, matching the wall-clock-driven
+        control_period/rl_step_period loop in `spinloop()` -- without it the
+        simulator would step as fast as the physics engine allows,
+        decoupling sim-time from the real time this loop assumes.
+        """
+        path = os.path.abspath(scene_path) if scene_path else DEFAULT_SCENE_PATH
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Scene file not found: {path}")
+
+        if self._sim.getSimulationState() != self._sim.simulation_stopped:
+            self._sim.stopSimulation()
+            while self._sim.getSimulationState() != self._sim.simulation_stopped:
+                time.sleep(0.05)
+
+        self._sim.loadScene(path)
+        self._sim.setBoolParam(self._sim.boolparam_realtime_simulation, True)
+        print(f"[AGENT] Loaded scene '{path}' (real-time simulation enabled)")
 
     def _null_action(self) -> List[float]:
         """Neutral action: [v=0.0 m/s, w=0.0 rad/s]."""
@@ -199,6 +246,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rl-step-period", type=float, default=0.08, help="RL action step period")
     parser.add_argument("--control-period", type=float, default=0.01, help="Sim tick period")
     parser.add_argument("--timeout", type=float, default=1.0, help="Timeout readWhatToDo")
+    parser.add_argument(
+        "--scene-path",
+        type=str,
+        default=None,
+        help="Path to the .ttt scene to load (default: scene/scene.ttt next to this script)",
+    )
+    parser.add_argument("--sim-host", default="127.0.0.1", help="CoppeliaSim ZMQ remote API host")
+    parser.add_argument("--sim-port", type=int, default=23000, help="CoppeliaSim ZMQ remote API port")
     parser.add_argument("--debug", action="store_true", help="Enable verbose logs")
     return parser.parse_args()
 
@@ -211,6 +266,9 @@ def main() -> None:
         rl_step_period=args.rl_step_period,
         control_period=args.control_period,
         timeout=args.timeout,
+        sim_host=args.sim_host,
+        sim_port=args.sim_port,
+        scene_path=args.scene_path,
         debug=args.debug,
     )
     try:
