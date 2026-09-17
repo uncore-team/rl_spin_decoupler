@@ -5,42 +5,35 @@ processes (RL side + agent side) synchronized over localhost TCP sockets.
 
 ## Available examples
 
-- [first_order_plant_control/README.md](first_order_plant_control/README.md): lightweight baseline example with a synthetic first-order plant where agent sends observations and RL computes reward/goal.
-- [lunar_lander/README.md](lunar_lander/README.md): Gymnasium + Stable-Baselines3 example where the agent only transports observations/timing and reward/termination are computed on RL side.
-- [lunar_lander_container/README.md](lunar_lander_container/README.md): split deployment of the LunarLander example, with the RL side running in an NVIDIA/CUDA container on a remote GPU host and the agent running locally.
+- [lunar_lander/README.md](lunar_lander/README.md): Gymnasium + Stable-Baselines3
+-  example where the agent only transports observations/timing and reward/termination 
+are computed on RL side.
+- [lunar_lander_container/README.md](lunar_lander_container/README.md): split
+ deployment of the LunarLander example, with the RL side running in an NVIDIA/CUDA container on a remote GPU host and the agent running locally.
+- [lunar_lander_remote/README.md](lunar_lander_remote/README.md): split deployment
+ of the LunarLander example across remote and local hosts without a container.
 
-## Quick run (first_order_plant_control)
+## Quick run (LunarLander)
 
-From the repository root, first install the package so the examples can
-`import spindecoupler` (its core is pure standard library, so this pulls no
-runtime dependencies):
+From the repository root, install the package and the dependencies for the
+LunarLander example:
 
 ```bash
 pip install -e .
-```
-
-Then open two terminals.
-
-Optional dependencies for the agent-side GUI:
-
-```bash
-pip install -r examples/first_order_plant_control/requirements.txt
+pip install -r examples/lunar_lander/requirements.txt
 ```
 
 Terminal 1 (RL side first):
 
 ```bash
-python examples/first_order_plant_control/rl_side_fopcontrol.py --port 49054 --steps 20
+python examples/lunar_lander/rl_side_lunarlander.py
 ```
 
 Terminal 2 (agent side second):
 
 ```bash
-python examples/first_order_plant_control/agent_side_fopcontrol.py --port 49054
+python examples/lunar_lander/agent_side_lunarlander.py --render
 ```
 
-To launch with the graphical monitor:
-
-```bash
-python examples/first_order_plant_control/agent_side_fopcontrol.py --port 49054 --plot
-```
+The remote and container deployment variants have their own setup and
+networking instructions in their README files.

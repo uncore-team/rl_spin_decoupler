@@ -32,14 +32,13 @@ External RL packages (for example Stable-Baselines3 or Gymnasium) are optional a
 ## Examples
 
 - Main examples index: [examples/README.md](examples/README.md)
-- First-order plant control example: [examples/first_order_plant_control/](examples/first_order_plant_control/README.md)
 - LunarLander SB3 decoupled example: [examples/lunar_lander/](examples/lunar_lander/README.md)
+- LunarLander remote deployments: [examples/lunar_lander_remote/](examples/lunar_lander_remote/README.md) and [examples/lunar_lander_container/](examples/lunar_lander_container/README.md)
 
-The first-order plant example is the lightweight baseline demo.
-
-The LunarLander example demonstrates the decoupled pattern where the agent
-process only transports observations/timing, while reward and episode
-termination logic are computed on the RL side.
+The LunarLander examples demonstrate the decoupled pattern where the agent
+process transports observations and timing, while reward and episode
+termination logic are computed on the RL side. The remote deployment variants
+show how to split those processes across hosts, with or without a container.
 
 ## Requirements
 
