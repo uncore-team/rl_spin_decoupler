@@ -109,7 +109,8 @@ cd rl_spin_decoupler
 - Select `Download ZIP`.
 - Extract the ZIP file to a local folder.
 
-After downloading, open the project folder in your editor and start using `spindecoupler.py` and the skeleton files as a base.
+After downloading, open the project folder in your editor and start using 
+`spindecoupler.py` and the skeleton files as a base.
 
 ## Quick Start
 
@@ -120,11 +121,14 @@ After downloading, open the project folder in your editor and start using `spind
 
 ## Templates
 
-These templates illustrate a typical decoupled setup: the RL process drives training at a lower frequency, while the agent process runs a faster control loop and exchanges observations/actions through the communication wrappers.
+These templates illustrate a typical decoupled setup: the RL process drives training at 
+a lower frequency, while the agent process runs a faster control loop and exchanges 
+observations/actions through the communication wrappers.
 
 ### RL Side Skeleton: Minimalist Gym-like wrapper using RL Spin Decoupler
 
-This skeleton wraps the RL-facing communication API in a Gym-like environment, so you can plug your learning loop with minimal glue code.
+This skeleton wraps the RL-facing communication API in a Gym-like environment, so you 
+can plug your learning loop with minimal glue code.
 
 ~~~python
 """ RL side skeleton. Orchestrates the learning process. """

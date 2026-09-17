@@ -13,13 +13,8 @@ sim = None
 robot_handle: Optional[int] = None
 vision_sensor_handles: List[int] = []
 
-# Created in sysCall_init but not currently wired into any vision sensor's
-# "entity to render" filter, so it has no effect on what the sensors detect
-# yet. Left in place because it looks like an intentional, half-finished
-# self-occlusion filter (it explicitly subtracts the robot's own body via
-# handle_tree/robot_handle below). Wire it into
-# `sim.setObjectInt32Param(sensor, sim.visionintparam_entity_to_render,
-# collection_handle)` in rebuild() if that's the intent, or drop it.
+# Collection used to prevent the vision sensors from detecting the robot's own
+# tree.
 collection_handle: Optional[int] = None
 
 config: Dict[str, Any] = {
@@ -97,6 +92,9 @@ def rebuild() -> None:
     for s in vision_sensor_handles:
         sim.setObjectFloatParam(s, sim.visionfloatparam_far_clipping, dist)
         sim.setObjectFloatParam(s, sim.visionfloatparam_perspective_angle, angle)
+        sim.setObjectInt32Param(
+            s, sim.visionintparam_entity_to_render, collection_handle
+        )
 
     lines = sim.addDrawingObject(sim.drawing_lines, 1, 0, -1, 1000, config["color_lines"])
     points = sim.addDrawingObject(sim.drawing_points, 3, 0, -1, 1000, config["color_points"])

@@ -9,7 +9,8 @@ processes (RL side + agent side) synchronized over localhost TCP sockets.
 -  example where the agent only transports observations/timing and reward/termination 
 are computed on RL side.
 - [lunar_lander_container/README.md](lunar_lander_container/README.md): split
- deployment of the LunarLander example, with the RL side running in an NVIDIA/CUDA container on a remote GPU host and the agent running locally.
+ deployment of the LunarLander example, with the RL side running in an NVIDIA/CUDA
+ container on a remote GPU host and the agent running locally.
 - [lunar_lander_remote/README.md](lunar_lander_remote/README.md): split deployment
  of the LunarLander example across remote and local hosts without a container.
 
