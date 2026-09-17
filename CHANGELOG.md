@@ -4,7 +4,7 @@ All notable changes to this repository are documented in this file.
 
 ## [1.2.1] - 2026-07-28
 ### Added
-- New end-to-end examples under `examples/`, including `first_order_plant_control` and `lunar_lander`, with runnable RL-side and agent-side scripts.
+- New end-to-end examples under `examples/`, including the LunarLander example and its runnable RL-side and agent-side scripts.
 - API documentation pages under `docs/` (including `docs/api.rst`) and generated HTML documentation in `docs/_build/html/`.
 
 ### Changed

@@ -58,8 +58,6 @@ jobs:
       - name: Run core test suite (coverage gate on library modules)
         run: >
           python -m pytest
-          --ignore=tests/test_fopcontrol_smoke.py
-          --ignore=tests/test_fopcontrol_reward_unit.py
           --ignore=tests/test_lunarlander_smoke.py
           --ignore=tests/test_lunarlander_reward_unit.py
           ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && '--cov-report=html' || '' }}
@@ -111,13 +109,10 @@ jobs:
       - name: Install package, test and example dependencies
         run: >
           python -m pip install -e ".[test]"
-          -r examples/first_order_plant_control/requirements.txt
           -r examples/lunar_lander/requirements.txt
       - name: Run example test suite (LunarLander smoke no longer skips)
         run: >
           python -m pytest
-          tests/test_fopcontrol_smoke.py
-          tests/test_fopcontrol_reward_unit.py
           tests/test_lunarlander_smoke.py
           tests/test_lunarlander_reward_unit.py
           --override-ini addopts=""

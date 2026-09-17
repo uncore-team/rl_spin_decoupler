@@ -122,7 +122,6 @@ if [ "$DO_INSTALL" -eq 1 ]; then
         echo "        El CI solo prueba los ejemplos en 3.10-3.13." ;;
     esac
     "$PY" -m pip install \
-      -r examples/first_order_plant_control/requirements.txt \
       -r examples/lunar_lander/requirements.txt
   fi
 fi
@@ -142,8 +141,6 @@ fi
 if [ "$RUN_CORE" -eq 1 ]; then
   section "test-core — pytest (gate de cobertura >=95%)"
   "$PY" -m pytest \
-    --ignore=tests/test_fopcontrol_smoke.py \
-    --ignore=tests/test_fopcontrol_reward_unit.py \
     --ignore=tests/test_lunarlander_smoke.py \
     --ignore=tests/test_lunarlander_reward_unit.py
   record "test-core" $?
@@ -153,8 +150,6 @@ fi
 if [ "$RUN_EXAMPLES" -eq 1 ]; then
   section "test-examples — pytest de ejemplos (sin gate de cobertura)"
   "$PY" -m pytest \
-    tests/test_fopcontrol_smoke.py \
-    tests/test_fopcontrol_reward_unit.py \
     tests/test_lunarlander_smoke.py \
     tests/test_lunarlander_reward_unit.py \
     --override-ini addopts=""

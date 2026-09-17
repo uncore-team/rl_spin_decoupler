@@ -20,14 +20,13 @@ A preliminary version of the method underlying this package, together with an ea
 6. **Documentation.** Browsable Sphinx documentation website
    (https://uncore-team.github.io/rl_spin_decoupler/) with installation, quickstart,
    tutorial, how-it-works, and API reference pages.
-7. **Runnable example suite.** Three self-contained, graded examples wired end-to-end
-   through the decoupler with per-step LAT/ATO telemetry: closed-loop control of a
-   first-order plant (pure software, no simulator); the classic Gymnasium LunarLander
-   benchmark trained with Stable-Baselines3 (PPO), where the agent only transports
-   observations/timing while reward and episode termination are computed on the RL
-   side; and a split cross-host deployment of that same LunarLander example, with the
-   RL side running in an NVIDIA/CUDA container on a remote GPU host and the agent
-   running on the local host (exercising the library's cross-host clock domains).
+7. **Runnable example suite.** Two self-contained example families wired end-to-end
+   through the decoupler with per-step LAT/ATO telemetry: the classic Gymnasium
+   LunarLander benchmark trained with Stable-Baselines3 (PPO), where the agent only
+   transports observations/timing while reward and episode termination are computed
+   on the RL side; and split cross-host deployments of that same LunarLander example,
+   with the RL side running either directly on a remote host or in an NVIDIA/CUDA
+   container (exercising the library's cross-host clock domains).
 8. **Communication-layer robustness (v1.2.1).** The socket transport now uses
    length-prefixed framing with `sendall` and exact-byte receives before
    `pickle.loads`, fixing potential message truncation/desynchronization of the
