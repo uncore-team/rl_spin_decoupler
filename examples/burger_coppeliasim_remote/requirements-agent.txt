@@ -1,0 +1,3 @@
+# Dependencies for the local CoppeliaSim agent.
+numpy>=1.24
+coppeliasim-zmqremoteapi-client>=2.0

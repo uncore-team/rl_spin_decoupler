@@ -1,0 +1,4 @@
+# Dependencies for the remote RL process.
+stable-baselines3==2.5.0
+gymnasium>=0.29,<1.1
+numpy>=1.24

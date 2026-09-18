@@ -60,6 +60,10 @@ jobs:
           python -m pytest
           --ignore=tests/test_lunarlander_smoke.py
           --ignore=tests/test_lunarlander_reward_unit.py
+          --ignore=tests/test_burger_coppeliasim_smoke.py
+          --ignore=tests/test_burger_coppeliasim_reward_unit.py
+          --ignore=tests/test_burger_real_smoke.py
+          --ignore=tests/test_burger_real_reward_unit.py
           ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && '--cov-report=html' || '' }}
       - name: Upload coverage artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
@@ -110,9 +114,14 @@ jobs:
         run: >
           python -m pip install -e ".[test]"
           -r examples/lunar_lander/requirements.txt
-      - name: Run example test suite (LunarLander smoke no longer skips)
+          -r examples/burger_coppeliasim_remote/requirements-rl.txt
+      - name: Run example test suite
         run: >
           python -m pytest
           tests/test_lunarlander_smoke.py
           tests/test_lunarlander_reward_unit.py
+          tests/test_burger_coppeliasim_smoke.py
+          tests/test_burger_coppeliasim_reward_unit.py
+          tests/test_burger_real_smoke.py
+          tests/test_burger_real_reward_unit.py
           --override-ini addopts=""
