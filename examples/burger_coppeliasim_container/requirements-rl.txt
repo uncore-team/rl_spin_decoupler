@@ -1,0 +1,4 @@
+# Dependencies installed in the remote RL container.
+stable-baselines3==2.5.0
+gymnasium>=0.29,<1.1
+numpy>=1.24

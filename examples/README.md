@@ -13,6 +13,12 @@ are computed on RL side.
  container on a remote GPU host and the agent running locally.
 - [lunar_lander_remote/README.md](lunar_lander_remote/README.md): split deployment
  of the LunarLander example across remote and local hosts without a container.
+- [burger_coppeliasim_remote/README.md](burger_coppeliasim_remote/README.md): split
+ deployment of the CoppeliaSim Burger example across remote and local hosts.
+- [burger_coppeliasim_container/README.md](burger_coppeliasim_container/README.md): split
+ deployment of the CoppeliaSim Burger example with the RL side in an NVIDIA container.
+- [burger_real/README.md](burger_real/README.md): ROS2 real Burger agent with a
+ pre-trained policy running on a remote RL host.
 
 ## Quick run (LunarLander)
 

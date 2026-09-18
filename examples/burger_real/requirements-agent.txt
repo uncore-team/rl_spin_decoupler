@@ -1,0 +1,2 @@
+# Install these with the ROS2 Humble Python environment.
+numpy>=1.24

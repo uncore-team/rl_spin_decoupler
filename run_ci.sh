@@ -111,8 +111,9 @@ PYVER="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 # -------------------------------- installation -----------------------------------
 if [ "$DO_INSTALL" -eq 1 ]; then
   section "Instalando paquete y dependencias"
-  "$PY" -m pip install --upgrade pip
-  # .[dev] includes ruff + pytest + pytest-cov: it covers lint and test-core.
+  # Keep the CI tools explicitly available in the selected interpreter.
+  "$PY" -m pip install pytest ruff
+  # .[dev] provides pytest-cov and the remaining development dependencies.
   "$PY" -m pip install -e ".[dev]"
   if [ "$RUN_EXAMPLES" -eq 1 ]; then
     case "$PYVER" in
@@ -122,7 +123,9 @@ if [ "$DO_INSTALL" -eq 1 ]; then
         echo "        El CI solo prueba los ejemplos en 3.10-3.13." ;;
     esac
     "$PY" -m pip install \
-      -r examples/lunar_lander/requirements.txt
+      -r examples/lunar_lander/requirements.txt \
+      -r examples/burger_coppeliasim_remote/requirements-rl.txt \
+      -r examples/burger_real/requirements-rl.txt
   fi
 fi
 
@@ -142,7 +145,11 @@ if [ "$RUN_CORE" -eq 1 ]; then
   section "test-core — pytest (gate de cobertura >=95%)"
   "$PY" -m pytest \
     --ignore=tests/test_lunarlander_smoke.py \
-    --ignore=tests/test_lunarlander_reward_unit.py
+    --ignore=tests/test_lunarlander_reward_unit.py \
+    --ignore=tests/test_burger_coppeliasim_smoke.py \
+    --ignore=tests/test_burger_coppeliasim_reward_unit.py \
+    --ignore=tests/test_burger_real_smoke.py \
+    --ignore=tests/test_burger_real_reward_unit.py
   record "test-core" $?
 fi
 
@@ -152,6 +159,10 @@ if [ "$RUN_EXAMPLES" -eq 1 ]; then
   "$PY" -m pytest \
     tests/test_lunarlander_smoke.py \
     tests/test_lunarlander_reward_unit.py \
+  tests/test_burger_coppeliasim_smoke.py \
+  tests/test_burger_coppeliasim_reward_unit.py \
+  tests/test_burger_real_smoke.py \
+  tests/test_burger_real_reward_unit.py \
     --override-ini addopts=""
   record "test-examples" $?
 fi

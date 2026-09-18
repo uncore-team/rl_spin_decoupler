@@ -34,6 +34,8 @@ External RL packages (for example Stable-Baselines3 or Gymnasium) are optional a
 - Main examples index: [examples/README.md](examples/README.md)
 - LunarLander SB3 decoupled example: [examples/lunar_lander/](examples/lunar_lander/README.md)
 - LunarLander remote deployments: [examples/lunar_lander_remote/](examples/lunar_lander_remote/README.md) and [examples/lunar_lander_container/](examples/lunar_lander_container/README.md)
+- CoppeliaSim Burger remote deployments: [examples/burger_coppeliasim_remote/](examples/burger_coppeliasim_remote/README.md) and [examples/burger_coppeliasim_container/](examples/burger_coppeliasim_container/README.md)
+- Real Burger ROS2 exploitation example: [examples/burger_real/](examples/burger_real/README.md)
 
 The LunarLander examples demonstrate the decoupled pattern where the agent
 process transports observations and timing, while reward and episode
