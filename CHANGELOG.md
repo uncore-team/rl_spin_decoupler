@@ -2,6 +2,15 @@
 
 All notable changes to this repository are documented in this file.
 
+## [Unreleased]
+### Added
+- Optional query channel: `RLSideQuery` (server) and `AgentSideQuery` (client) let the agent request, on demand, the action that the RL policy would take for a given observation. Both classes are exported from the package.
+- Unit and over-TCP tests for the query channel, including server reconnection.
+- Query channel documentation in `docs/how-it-works.rst` and `docs/api.rst`.
+
+### Changed
+- In `socketcomms/comms.py`, both endpoints now disable Nagle's algorithm (`TCP_NODELAY`). Without it, a short message sent right after another one in the same direction (e.g., the observation after `LAT`) could be held until the delayed ACK of the first one, adding latency spikes of up to ~40 ms per step when actions last less than that in wall-clock time.
+
 ## [1.2.1] - 2026-07-28
 ### Added
 - New end-to-end examples under `examples/`, including `first_order_plant_control` and `lunar_lander`, with runnable RL-side and agent-side scripts.

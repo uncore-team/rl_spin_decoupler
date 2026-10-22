@@ -17,6 +17,8 @@ Usually, this would not be necessary since in many cases you can implement in th
 
 Its use is pretty simple: you will have a Python program running RL and another one -a different process- running the agent. The former will use the `RLSide` class of this module, and the latter the `AgentSide` class in order to communicate to each other (communications are implemented with [sockets](https://docs.python.org/3/library/socket.html)). You can find further explanations in the code about when and how to call the methods of these classes in order to sync both processes. 
 
+Once a policy has been trained, the optional `RLSideQuery` / `AgentSideQuery` pair lets the agent ask the RL process, on demand, for the action that the policy would take for a given observation (see [How It Works](docs/how-it-works.rst)).
+
 In addition, two files called 'skeleton_...' contain incomplete implementations of a case of use of the decoupler, and [examples/](examples/README.md) contains a fully executable end-to-end demo.
 
 Besides facilitating the link between different processes that carry out RL and agent simulation/control, this decoupler may be useful as well when **different timings are involved and matter** (for instance, if the agent must execute some action at a given time, while the RL algorithm has no notion of that).
