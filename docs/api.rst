@@ -16,6 +16,19 @@ High-level API
    :members:
    :show-inheritance:
 
+Query channel
+-------------
+
+.. currentmodule:: spindecoupler
+
+.. autoclass:: RLSideQuery
+   :members:
+   :show-inheritance:
+
+.. autoclass:: AgentSideQuery
+   :members:
+   :show-inheritance:
+
 Transport primitives
 --------------------
 

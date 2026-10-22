@@ -248,6 +248,10 @@ class ServerCommPoint(BaseCommPoint):
         )  # after this, we assume the other side has shut down
         try:
             self._sock, _ = self._basesock.accept()  # wait for calling us
+            # Disable Nagle's algorithm: otherwise a short message sent right after
+            # another one (e.g., LAT and then the observation) can be held until the
+            # delayed ACK of the first arrives, adding latency spikes of ~40 ms.
+            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._begun = True
             self._basesock.settimeout(None)  # to deactivate timeout in other operations
             return ""
@@ -301,6 +305,8 @@ class ClientCommPoint(BaseCommPoint):
             self._sock = socket.socket(
                 socket.AF_INET, socket.SOCK_STREAM
             )  # 1st arg: ip4, 2nd: TCP
+            # Disable Nagle's algorithm (see ServerCommPoint.begin).
+            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             # If the server has called bind/listen, connect returns even if accept
             # has not happened yet because the connection is queued by the OS.
             self._sock.connect((self._ipv4, self._port))

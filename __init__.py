@@ -4,18 +4,22 @@
 
 from .spindecoupler import (
     AgentSide,
+    AgentSideQuery,
     BaseCommPoint,
     ClientCommPoint,
     RLSide,
+    RLSideQuery,
     ServerCommPoint,
     __version__,
 )
 
 __all__ = [
     "AgentSide",
+    "AgentSideQuery",
     "BaseCommPoint",
     "ClientCommPoint",
     "RLSide",
+    "RLSideQuery",
     "ServerCommPoint",
     "__version__",
 ]

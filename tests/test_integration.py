@@ -85,6 +85,26 @@ def test_rl_agent_full_cycle_over_tcp(free_tcp_port, force_localhost):
     ]
 
 
+def test_rl_and_agent_sockets_disable_nagle(free_tcp_port, force_localhost):
+    sides = {}
+
+    def rl_worker():
+        sides["rl"] = RLSide(free_tcp_port)
+
+    rl_thread = threading.Thread(target=rl_worker, daemon=True)
+    rl_thread.start()
+
+    agent = connect_agent_with_retry(BaseCommPoint.get_ip(), free_tcp_port)
+    rl_thread.join(timeout=3.0)
+
+    assert not rl_thread.is_alive(), "RL side did not accept the connection"
+    for sock in (sides["rl"]._rlcomm._sock, agent._rlcomm._sock):
+        assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
+
+    agent._rlcomm.end()
+    sides["rl"]._rlcomm.end()
+
+
 def test_rl_side_raises_after_abrupt_agent_disconnect(free_tcp_port, force_localhost):
     results = {}
 
