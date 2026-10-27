@@ -201,6 +201,7 @@ class SimulatedAgent:
         try:
             while True:
                 now = time.time()
+                #print("At {}, state: {}".format(now,self._state))
                 self._apply_control_tick()
                 self._update_visualization(now)
 
@@ -216,6 +217,7 @@ class SimulatedAgent:
 
                 elif self._state == StepState.READY_FOR_RL_COMMAND:
                     command = self._comm.readWhatToDo(timeout=timeout)
+                    #print("\tCommand to do: {}".format(command))
                     if command is not None:
                         what, payload = command
                         if what == AgentSide.WhatToDo.RESET_SEND_OBS:
