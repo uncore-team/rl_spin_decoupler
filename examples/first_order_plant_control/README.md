@@ -22,6 +22,13 @@ Terminal 1:
 python examples/first_order_plant_control/rl_side_fopcontrol.py --port 49054 --steps 20
 ```
 
+In case the current folder is not in the Python path, you can launch it as a module:
+
+
+```bash
+python -m examples.first_order_plant_control.rl_side_fopcontrol --port 49054 --steps 20
+```
+
 Optional: to display a live GUI on the agent side (plant state, target, gain,
 and action timing), install Matplotlib and add `--plot` in Terminal 2.
 
