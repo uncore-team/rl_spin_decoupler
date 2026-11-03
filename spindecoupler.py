@@ -28,9 +28,11 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "0+unknown"
 __all__ = [
     "AgentSide",
+    "AgentSideQuery",
     "BaseCommPoint",
     "ClientCommPoint",
     "RLSide",
+    "RLSideQuery",
     "ServerCommPoint",
 ]
 
@@ -402,3 +404,223 @@ class AgentSide:
         res = self._rlcomm.sendData({"obs": obs, "ato": agenttime})
         if len(res) > 0:
             raise RuntimeError("Error sending observation to RL. " + res)
+
+
+# -------------------------------------------------------------------------------
+#
+# 	Base Class: RLSideQuery
+#
+# -------------------------------------------------------------------------------
+
+
+class RLSideQuery:
+    """
+    Query server used by the reinforcement-learning process.
+
+    Unlike :class:`RLSide`, which drives the agent through the ``reset()`` /
+    ``step()`` cycle, an :class:`RLSideQuery` instance only answers on-demand
+    requests: the agent sends an observation (for example, a virtual pose that
+    has not been visited) and the RL process replies with the action that its
+    policy would take. This is typically used at deployment time, once a model
+    has been trained, and it can run on its own port alongside or instead of an
+    :class:`RLSide` channel.
+
+    The typical call sequence in a query server is:
+
+    1. Construct :class:`RLSideQuery` and wait for the agent to connect.
+    2. Call :meth:`receive_query` to block until the agent sends a query.
+    3. Compute the action and send it back with :meth:`send_action`.
+    4. If the agent disconnects, call :meth:`reconnect` to wait for a new one.
+    """
+
+    def __init__(self, port: int, verbose: bool = False):
+        """
+        Create the query server endpoint and wait for the agent.
+
+        Args:
+                port: TCP port used by the RL process to listen for the agent
+                        query connection. Valid ports are restricted by the
+                        underlying transport layer to the range ``20000`` to
+                        ``49151``.
+                verbose: If ``True``, print lifecycle messages while waiting for the
+                        agent and while closing the connection.
+
+        Raises:
+                RuntimeError: If no agent connects before the transport timeout.
+        """
+
+        self._verbose = verbose
+        self._srv = ServerCommPoint(port)
+        if self._verbose:
+            print(
+                "[Query server] Waiting for agent query connection "
+                "on port {}...".format(port)
+            )
+        res = self._srv.begin(timeoutaccept=60.0)
+        if len(res) > 0:
+            raise RuntimeError("No agent connection for query channel: " + res)
+        if self._verbose:
+            print("[Query server] Agent connected for queries.")
+
+    def __del__(self):
+        """Best-effort shutdown during garbage collection."""
+
+        srv = getattr(self, "_srv", None)
+        if srv is None:
+            return
+        res = srv.end()
+        if len(res) > 0:
+            print("[Query server] Error closing query channel: " + res)
+        if self._verbose:
+            print("[Query server] Communications closed in the RL side.")
+
+    def reconnect(self, timeoutaccept: float = 60.0):
+        """
+        Drop the current agent connection and wait for a new one.
+
+        Use this after a communication error (for example, when the agent
+        process has been restarted) to keep serving queries without recreating
+        the listening socket.
+
+        Args:
+                timeoutaccept: Maximum number of seconds to wait for a new agent
+                        connection. It must be greater than ``0.0``.
+
+        Raises:
+                RuntimeError: If the current connection cannot be closed or if no
+                        agent connects before the timeout.
+        """
+
+        res = self._srv.end()
+        if len(res) > 0:
+            raise RuntimeError("Error closing query channel (RL side): " + res)
+        if self._verbose:
+            print("[Query server] Waiting for agent query reconnection...")
+        res = self._srv.begin(timeoutaccept=timeoutaccept)
+        if len(res) > 0:
+            raise RuntimeError("No agent reconnection for query channel: " + res)
+        if self._verbose:
+            print("[Query server] Agent reconnected for queries.")
+
+    def receive_query(self, timeout: float = -1.0):
+        """
+        Wait for the next query sent by :meth:`AgentSideQuery.query_action`.
+
+        Args:
+                timeout: Maximum number of seconds to wait for a query. Values less
+                        than or equal to ``0.0`` block until a query arrives.
+
+        Returns:
+                dict: The raw query message, ``{"stepkind": "query", "obs": obs}``,
+                where ``obs`` is the observation object sent by the agent.
+
+        Raises:
+                RuntimeError: If the query cannot be received, for example because
+                        the agent has disconnected or the timeout has expired.
+        """
+
+        res, msg = self._srv.readData(timeout)
+        if len(res) > 0:
+            raise RuntimeError("Error reading query from agent: " + res)
+        return msg
+
+    def send_action(self, action):
+        """
+        Send the action computed for the last received query.
+
+        Args:
+                action: Action object to send back to the agent. It must be
+                        serializable by Python ``pickle``.
+
+        Raises:
+                RuntimeError: If the action cannot be sent.
+        """
+
+        res = self._srv.sendData({"action": action})
+        if len(res) > 0:
+            raise RuntimeError("Error sending action to agent (query channel): " + res)
+
+
+# -------------------------------------------------------------------------------
+#
+# 	Base Class: AgentSideQuery
+#
+# -------------------------------------------------------------------------------
+
+
+class AgentSideQuery:
+    """
+    Query client used by the external agent process.
+
+    An :class:`AgentSideQuery` instance connects to an :class:`RLSideQuery`
+    server and asks it, on demand, for the action that the RL policy would take
+    for a given observation. Each call to :meth:`query_action` is a blocking
+    request/response exchange.
+    """
+
+    def __init__(self, ip_rl: str, port_rl: int, verbose: bool = False):
+        """
+        Create the query client endpoint and connect to the RL side.
+
+        Args:
+                ip_rl: IPv4 address of the RL process that owns the query server.
+                port_rl: TCP port exposed by the query server.
+                verbose: If ``True``, print lifecycle messages while connecting and
+                        while closing the connection.
+
+        Raises:
+                RuntimeError: If the client socket cannot connect to the RL process.
+        """
+
+        self._verbose = verbose
+        self._comm = ClientCommPoint(ip_rl, port_rl)
+        res = self._comm.begin()
+        if len(res) > 0:
+            raise RuntimeError(
+                "[Query client] Error connecting query channel to RL: " + res
+            )
+        if self._verbose:
+            print("[Query client] Agent connected to RL query channel.")
+
+    def __del__(self):
+        """Best-effort shutdown during garbage collection."""
+
+        comm = getattr(self, "_comm", None)
+        if comm is None:
+            return
+        res = comm.end()
+        if len(res) > 0:
+            print("[Query client] Error closing query channel: " + res)
+        if self._verbose:
+            print("[Query client] Communications closed in the agent side.")
+
+    def query_action(self, obs, timeout: float = 10.0):
+        """
+        Send an observation to the RL side and wait for the resulting action.
+
+        Args:
+                obs: Observation object to evaluate. It must be serializable by
+                        Python ``pickle``; its format is agreed between the agent and
+                        the query server.
+                timeout: Maximum number of seconds to wait for the response. Values
+                        less than or equal to ``0.0`` block until it arrives.
+
+        Returns:
+                The action object sent back by :meth:`RLSideQuery.send_action`.
+
+        Raises:
+                RuntimeError: If the query cannot be sent or the response is not
+                        received successfully.
+        """
+
+        res = self._comm.sendData({"stepkind": "query", "obs": obs})
+        if len(res) > 0:
+            raise RuntimeError("[Query client] Error sending query obs to RL: " + res)
+
+        res, msg = self._comm.readData(timeout)
+        if len(res) > 0:
+            raise RuntimeError(
+                "[Query client] Error receiving query action from RL: " + res
+            )
+
+        return msg["action"]

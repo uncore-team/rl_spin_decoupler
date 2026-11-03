@@ -18,7 +18,11 @@ class FakeSocket:
         self.recv_error = recv_error
         self.sent_payloads = []
         self.timeout_history = []
+        self.sockopts = []
         self.closed = False
+
+    def setsockopt(self, level, option, value):
+        self.sockopts.append((level, option, value))
 
     def send(self, data):
         if self.send_error is not None:
@@ -440,6 +444,7 @@ def test_server_begin_accepts_connection_and_end_closes_socket():
     assert server.begin(1.0) == ""
     assert server._begun is True
     assert server._sock is accepted
+    assert accepted.sockopts == [(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)]
     assert server.end() == ""
     assert accepted.closed is True
     assert server._begun is False
@@ -491,6 +496,7 @@ def test_client_begin_and_end(monkeypatch):
 
     assert client.begin() == ""
     assert fake_socket.connect_calls[-1] == ("127.0.0.1", 24000)
+    assert fake_socket.sockopts == [(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)]
     assert client.end() == ""
     assert fake_socket.closed is True
 
