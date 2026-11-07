@@ -54,7 +54,7 @@ Start the RL side first, because it listens, and the agent second.
 # RL process
 from spindecoupler import RLSide
 
-rl = RLSide(port=49054, verbose=True)   # waits up to 60 s for the agent
+rl = RLSide(port=49054, verbose=True)   # waits 60 s for the agent (accept_timeout)
 obs, ato = rl.resetGetObs()
 lat, obs, rew, ato = rl.stepSendActGetObs({"move": "left"})
 rl.stepExpFinished()
@@ -106,6 +106,23 @@ everything:
 
 In the LunarLander and Burger examples the agent only transports observations and
 timing, while reward and the task-level end of the episode are computed on the RL side.
+
+## Gymnasium environment
+
+Each example wraps `RLSide` in a Gymnasium environment. `spindecoupler_gym.DecoupledEnv`
+is that wrapper (it needs `pip install gymnasium`; the core module does not). A task
+subclasses it and overrides `compute_reward()`, and optionally `parse_payload()`,
+`is_terminated()` and `is_truncated()`. `step()` returns the timing values of the
+protocol in `info`. The [LunarLander example](examples/lunar_lander/rl_side_lunarlander.py)
+is a complete use.
+
+## Benchmarks
+
+[`benchmarks/`](benchmarks/README.md) has two scripts that reproduce the timing claims: a
+protocol step takes 0.14 ms instead of 44 ms thanks to `TCP_NODELAY`, and a decoupled
+agent keeps its control loop period while the learner takes up to 200 ms per decision,
+where a coupled agent stalls for that long. See also the
+[related work](docs/related-work.rst).
 
 ## Development
 

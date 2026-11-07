@@ -105,7 +105,7 @@ in the current directory).
 
 The slowest reply is the first reset, when the agent has to start the simulation and
 rebuild the arena, hence the RL default of 30 seconds. Raise it on a slow or distant link.
-The 60-second wait for the agent to connect cannot be changed, so start the agent promptly.
+The RL side waits 60 seconds for the agent to connect (the `accept_timeout` of `RLSide`, not exposed by the script), so start the agent promptly.
 
 ## Trying it on one machine
 

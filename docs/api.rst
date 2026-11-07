@@ -16,6 +16,17 @@ High-level API
    :members:
    :show-inheritance:
 
+Gymnasium environment
+---------------------
+
+Needs Gymnasium (``pip install gymnasium``); the core library does not.
+
+.. currentmodule:: spindecoupler_gym
+
+.. autoclass:: DecoupledEnv
+   :members:
+   :show-inheritance:
+
 Transport primitives
 --------------------
 

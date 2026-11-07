@@ -19,12 +19,22 @@ from importlib.metadata import PackageNotFoundError, version
 
 try:
     from rl_spin_decoupler.socketcomms.comms import (
+        DEFAULT_MAX_FRAME_SIZE,
         BaseCommPoint,
         ClientCommPoint,
         ServerCommPoint,
+        enable_console_logging,
+        logger,
     )
 except ImportError:  # pragma: no cover
-    from socketcomms.comms import BaseCommPoint, ClientCommPoint, ServerCommPoint
+    from socketcomms.comms import (
+        DEFAULT_MAX_FRAME_SIZE,
+        BaseCommPoint,
+        ClientCommPoint,
+        ServerCommPoint,
+        enable_console_logging,
+        logger,
+    )
 
 
 try:
@@ -39,6 +49,7 @@ __all__ = [
     "ClientCommPoint",
     "RLSide",
     "ServerCommPoint",
+    "enable_console_logging",
 ]
 
 
@@ -58,33 +69,59 @@ class RLSide:
     observations and timing values between the two processes.
     """
 
-    def __init__(self, port: int, verbose: bool = False):
+    def __init__(
+        self,
+        port: int,
+        verbose: bool = False,
+        *,
+        accept_timeout: float = 60.0,
+        max_frame_size: int = DEFAULT_MAX_FRAME_SIZE,
+        allow_pickle: bool = False,
+        send_timeout: float = 10.0,
+    ):
         """
         Open the server socket and wait for the agent to connect.
-
-        The wait lasts up to 60 seconds and cannot be changed.
 
         Args:
             port: TCP port to listen on, between 20000 and 49151. The socket binds
                 to every interface, so this works on a bare host and inside a
                 container that publishes the port.
-            verbose: Print a message when waiting starts and when the agent
-                connects, and when the connection is closed.
+            verbose: Log a message when waiting starts and when the agent
+                connects, and when the connection is closed. The messages go to
+                the ``spindecoupler`` logger, and ``verbose`` also shows them on the
+                standard output.
+            accept_timeout: Seconds to wait for the agent to connect. Raise it when
+                the agent starts on another host after a delay.
+            max_frame_size: Largest message, in bytes, that is sent or accepted.
+            allow_pickle: Accept any pickle from the agent. By default only plain
+                data and NumPy arrays are accepted. Enable it only if you trust
+                the agent: a pickle can run arbitrary code.
+            send_timeout: Seconds a send may block if the agent stops reading.
 
         Raises:
+            ValueError: If ``accept_timeout`` is not positive.
             RuntimeError: If the agent does not connect in time.
             OSError: If the port stays in use (see :class:`ServerCommPoint`).
         """
 
+        if accept_timeout <= 0.0:
+            raise ValueError("accept_timeout must be > 0.0")
         self._verbose = verbose
-        self._rlcomm = ServerCommPoint(port)  # not connected yet
         if self._verbose:
-            print("RL decoupler enabled. Waiting for agent connection...")
-        res = self._rlcomm.begin(timeoutaccept=60.0)  # blocks for agent
+            enable_console_logging()
+        self._rlcomm = ServerCommPoint(
+            port,
+            max_frame_size=max_frame_size,
+            allow_pickle=allow_pickle,
+            send_timeout=send_timeout,
+        )  # not connected yet
+        if self._verbose:
+            logger.info("RL decoupler enabled. Waiting for agent connection...")
+        res = self._rlcomm.begin(timeoutaccept=accept_timeout)  # blocks for agent
         if len(res) > 0:
             raise RuntimeError("No agent connection: " + res)
         if self._verbose:
-            print("Agent connected to this RL")
+            logger.info("Agent connected to this RL")
 
     def __del__(self):
         """Close the connection when the object is collected."""
@@ -94,9 +131,9 @@ class RLSide:
             return
         res = rlcomm.end()
         if len(res) > 0:
-            print("Error closing communications with the agent: " + res)
+            logger.error("Error closing communications with the agent: " + res)
         if self._verbose:
-            print("Communications closed in the RL side.")
+            logger.info("Communications closed in the RL side.")
 
     def resetGetObs(self, timeout: float = 10.0):
         """
@@ -205,7 +242,14 @@ class AgentSide:
         FINISH = 2  # the experiment is over
 
     def __init__(
-        self, ipbaselinespart: str, portbaselinespart: int, verbose: bool = False
+        self,
+        ipbaselinespart: str,
+        portbaselinespart: int,
+        verbose: bool = False,
+        *,
+        max_frame_size: int = DEFAULT_MAX_FRAME_SIZE,
+        allow_pickle: bool = False,
+        send_timeout: float = 10.0,
     ):
         """
         Connect to the RL side.
@@ -216,24 +260,38 @@ class AgentSide:
             ipbaselinespart: IPv4 address of the RL process. When both processes
                 run on the same host, ``BaseCommPoint.get_ip()`` gives a valid one.
             portbaselinespart: TCP port the RL process listens on.
-            verbose: Print a message when the connection is opened and closed.
+            verbose: Log a message when the connection is opened and closed (see
+                :class:`RLSide` for where the messages go).
+            max_frame_size: Largest message, in bytes, that is sent or accepted.
+            allow_pickle: Accept any pickle from the RL side. By default only plain
+                data and NumPy arrays are accepted. Enable it only if you trust
+                the RL side.
+            send_timeout: Seconds a send may block if the RL side stops reading.
 
         Raises:
             RuntimeError: If the connection cannot be established.
         """
 
         self._verbose = verbose
-        self._rlcomm = ClientCommPoint(ipbaselinespart, portbaselinespart)
+        if self._verbose:
+            enable_console_logging()
+        self._rlcomm = ClientCommPoint(
+            ipbaselinespart,
+            portbaselinespart,
+            max_frame_size=max_frame_size,
+            allow_pickle=allow_pickle,
+            send_timeout=send_timeout,
+        )
 
         if self._verbose:
-            print("Agent decoupler enabled.")
+            logger.info("Agent decoupler enabled.")
 
         res = self._rlcomm.begin()
         if len(res) > 0:
             raise RuntimeError("Error starting connection with RL. " + res)
 
         if self._verbose:
-            print("Agent decoupler connected to RL decoupler")
+            logger.info("Agent decoupler connected to RL decoupler")
 
     def __del__(self):
         """Close the connection when the object is collected."""
@@ -245,7 +303,7 @@ class AgentSide:
         if len(res) > 0:
             raise RuntimeError("Error stopping connection with RL: " + res)
         if self._verbose:
-            print("Connection with RL finished.")
+            logger.info("Connection with RL finished.")
 
     def readWhatToDo(self, timeout: float = 10.0):
         """

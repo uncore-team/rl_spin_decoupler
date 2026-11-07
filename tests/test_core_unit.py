@@ -5,7 +5,11 @@ import socket
 import struct
 
 import pytest
-from rl_spin_decoupler.socketcomms.comms import ClientCommPoint, ServerCommPoint
+from rl_spin_decoupler.socketcomms.comms import (
+    PROTOCOL_VERSION,
+    ClientCommPoint,
+    ServerCommPoint,
+)
 
 import spindecoupler as spindecoupler_module
 from spindecoupler import AgentSide, BaseCommPoint, RLSide
@@ -124,9 +128,13 @@ def make_base_point():
     return point
 
 
+def header(size, magic=b"SD", version=PROTOCOL_VERSION):
+    return struct.pack("!2sBI", magic, version, size)
+
+
 def framed(payload):
     body = pickle.dumps(payload)
-    return [struct.pack("!I", len(body)), body]
+    return [header(len(body)), body]
 
 
 def make_agent_side(fake_comm):
@@ -147,7 +155,7 @@ def test_base_commpoint_validates_constructor_arguments():
     with pytest.raises(TypeError):
         BaseCommPoint(kind="server")
     with pytest.raises(ValueError):
-        BaseCommPoint(kind=BaseCommPoint.Kind.SERVER, datachunkmaxsize=0)
+        BaseCommPoint(kind=BaseCommPoint.Kind.SERVER, max_frame_size=0)
     with pytest.raises(ValueError):
         BaseCommPoint(kind=BaseCommPoint.Kind.SERVER, port=19999)
     with pytest.raises(ValueError):
@@ -197,8 +205,8 @@ def test_send_data_serializes_dictionary():
 
     assert point.sendData(payload) == ""
     frame = point._sock.sent_payloads[0]
-    assert struct.unpack("!I", frame[:4])[0] == len(frame[4:])
-    assert pickle.loads(frame[4:]) == payload
+    assert frame[:7] == header(len(frame[7:]))
+    assert pickle.loads(frame[7:]) == payload
 
 
 def test_send_data_wraps_socket_errors():
@@ -271,7 +279,7 @@ def test_read_data_debug_path():
 
 def test_read_data_reports_malformed_payload():
     point = make_base_point()
-    point._sock = FakeSocket(recv_payloads=[struct.pack("!I", 12), b"not-a-pickle"])
+    point._sock = FakeSocket(recv_payloads=[header(12), b"not-a-pickle"])
 
     res, data = point.readData(timeout=0.5)
 
@@ -533,7 +541,7 @@ def test_client_end_returns_close_error():
 
 def test_rlside_init_verbose_and_error_path(monkeypatch, capsys):
     class FakeServerCommPoint:
-        def __init__(self, port):
+        def __init__(self, port, **options):
             self.port = port
 
         def begin(self, timeoutaccept):
@@ -556,7 +564,7 @@ def test_rlside_init_verbose_and_error_path(monkeypatch, capsys):
 
 def test_agentside_init_verbose_and_error_path(monkeypatch, capsys):
     class FakeClientCommPoint:
-        def __init__(self, ip, port):
+        def __init__(self, ip, port, **options):
             self.ip = ip
             self.port = port
 
@@ -578,7 +586,7 @@ def test_agentside_init_verbose_and_error_path(monkeypatch, capsys):
 
 def test_agentside_init_verbose_success_path(monkeypatch, capsys):
     class FakeClientCommPoint:
-        def __init__(self, ip, port):
+        def __init__(self, ip, port, **options):
             self.ip = ip
             self.port = port
 

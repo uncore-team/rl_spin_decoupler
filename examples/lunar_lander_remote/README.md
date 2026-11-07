@@ -94,8 +94,9 @@ display).
 | `PYTHON` | `python3` | both | Interpreter with the dependencies |
 
 On a slow or distant link raise `TIMEOUT`: the RL side gives up when an agent reply takes
-longer. The wait of 60 seconds for the agent to connect cannot be changed, so start the
-agent promptly; if it expires, start both again.
+longer. The wait of 60 seconds for the agent to connect (the `accept_timeout` of
+`RLSide`, not exposed by the script) is short on a slow start, so start the agent promptly; if it expires,
+start both again.
 
 ## Trying it on one machine
 

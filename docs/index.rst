@@ -18,4 +18,6 @@ works, and the API reference generated from the docstrings.
    quickstart
    tutorial
    how-it-works
+   benchmarks
+   related-work
    api

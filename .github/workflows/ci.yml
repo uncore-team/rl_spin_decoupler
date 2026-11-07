@@ -134,4 +134,5 @@ jobs:
           tests/test_lunarlander_deployments.py
           tests/test_fopcontrol_smoke.py
           tests/test_fopcontrol_reward_unit.py
+          tests/test_gym_env.py
           --override-ini addopts=""

@@ -48,36 +48,18 @@ al., 2026). The released package extends that work in the following ways.
    against the receiver's delayed ACK), and the exchange of one step took 44 ms on
    loopback instead of 0.14 ms.
 
-## Proposed changes to the library
+9. Gymnasium environment. `spindecoupler_gym.DecoupledEnv` is the wrapper that the
+   examples repeated: a task only supplies the reward and the end of the episode. The
+   LunarLander example uses it.
 
-Findings from a review of `spindecoupler.py` and `socketcomms/comms.py`, kept here for a
-later pull request. None is applied yet because each one changes behavior. The behaviors
-were reproduced with small probes, except the last two items.
+10. Benchmarks. Two scripts reproduce the timing claims: the cost of a step with and
+    without `TCP_NODELAY`, and the regularity of the agent's control loop against the
+    time the learner needs, coupled and decoupled.
 
-1. Maximum frame size. The receiver trusts the 4-byte length header, so a peer that sends
-   a huge value makes it try to read (and buffer) that many bytes. A configurable limit,
-   with a clear error, would bound memory use.
-
-2. Safer deserialization. `pickle.loads` runs arbitrary code from whoever reaches the
-   port. This is documented, but it is the first thing a reviewer will notice. Options:
-   a restricted `Unpickler` with an allowlist of types, or a plain format (for instance
-   JSON or msgpack) for the common payloads, keeping pickle as an opt-in.
-
-3. `SO_REUSEADDR` on the server socket (POSIX only; on Windows it has other semantics).
-   Restarting the RL side right after a run fails with "address already in use" while
-   the old connection is in TIME_WAIT.
-
-4. Configurable accept timeout. `RLSide` waits a fixed 60 s for the agent, which is short
-   when the agent starts on another host and long in tests. Expose it as an argument.
-
-5. Blocking `sendall`. A peer that stops reading blocks the sender once the socket
-   buffers fill, with large payloads, and the call timeout does not cover it.
-
-6. Protocol handshake with a version number, so that mismatched releases fail with a
-   clear message instead of a pickle error.
-
-7. Use `logging` instead of `print` for the `verbose` messages, so applications can
-   route or silence them.
-
-8. Small fixes: the message of `checkDataToRead` does not describe the failing operation,
-   `errno` is used without being imported, and `datachunkmaxsize` is no longer used.
+11. Transport hardening. Frames carry a header with a magic number and a protocol
+    version, so a foreign peer or a mismatched release fails with a clear message. The
+    frame size is bounded (`max_frame_size`), incoming pickles are restricted to an
+    allowlist unless `allow_pickle=True`, a stuck peer cannot block a send forever
+    (`send_timeout`), the server socket sets `SO_REUSEADDR` on POSIX, the wait for the
+    agent is configurable (`accept_timeout`), and the `verbose` output goes through
+    `logging`.

@@ -16,29 +16,26 @@ the physics flags of Gymnasium.
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 from typing import Any
 
-import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from reward import compute_reward, is_terminated, is_truncated
 from stable_baselines3 import PPO
 
 from spindecoupler import RLSide
+from spindecoupler_gym import DecoupledEnv
 
 
-class DecoupledLunarLanderEnv(gym.Env):
+class DecoupledLunarLanderEnv(DecoupledEnv):
     """
-    Gymnasium environment whose steps are served by the agent.
+    LunarLander whose steps are served by the agent.
 
-    Reward comes from the received observation. An episode terminates when the agent
-    reports a physics end or the lander has landed, and is truncated when the agent
-    reports its time limit or the RL-side step budget runs out.
+    Reward comes from the received observation (reward.py). An episode terminates
+    when the agent reports a physics end or the lander has landed, and is truncated
+    when the agent reports its time limit or the RL-side step budget runs out.
     """
-
-    metadata = {"render_modes": []}
 
     def __init__(
         self,
@@ -47,22 +44,19 @@ class DecoupledLunarLanderEnv(gym.Env):
         max_steps: int = 1000,
         debug: bool = False,
     ):
-        super().__init__()
-        self._timeout = timeout
-        self._max_steps = max_steps
-        self._debug = debug
-        self._comm = RLSide(port, verbose=debug)
-        self._finished = False
-        self._step_count = 0
-        self._prev_obs: np.ndarray | None = None
-
-        # LunarLander-v3 uses 8 floats in observation and 4 discrete actions.
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32
+        super().__init__(
+            RLSide(port, verbose=debug),
+            # LunarLander-v3: 8 floats in the observation and 4 discrete actions.
+            observation_space=spaces.Box(
+                low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32
+            ),
+            action_space=spaces.Discrete(4),
+            timeout=timeout,
+            max_steps=max_steps,
+            debug=debug,
         )
-        self.action_space = spaces.Discrete(4)
 
-    def _parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+    def parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
         """Split the agent's payload into observation, terminated and truncated."""
 
         if isinstance(payload, dict):
@@ -82,63 +76,18 @@ class DecoupledLunarLanderEnv(gym.Env):
             )
         return obs, terminated, truncated
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
-        super().reset(seed=seed)
-        payload, ato = self._comm.resetGetObs(timeout=self._timeout)
-        obs, _terminated, _truncated = self._parse_payload(payload)
-        self._step_count = 0
-        self._prev_obs = obs.copy()
-
-        info: dict[str, Any] = {"t_agent": ato, "step_count": self._step_count}
-        if self._debug:
-            print(f"[RL] reset ato={ato:.6f} obs={obs.tolist()}")
-        return obs, info
-
     def step(self, action):
-        # The transported reward slot is unused: reward is computed here.
-        lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
-            int(action), timeout=self._timeout
-        )
-        obs, term_phys, trunc_phys = self._parse_payload(payload)
+        # Gymnasium hands the discrete action as a NumPy integer; send a plain int.
+        return super().step(int(action))
 
-        reward = compute_reward(obs, int(action), self._prev_obs, float(lat))
+    def compute_reward(self, obs, action, prev_obs, lat):
+        return compute_reward(obs, action, prev_obs, lat)
 
-        self._step_count += 1
-        terminated = bool(term_phys or is_terminated(obs))
-        truncated = bool(trunc_phys or is_truncated(self._step_count, self._max_steps))
-        self._prev_obs = obs.copy()
+    def is_terminated(self, obs):
+        return is_terminated(obs)
 
-        t_wall = time.time()
-        info: dict[str, Any] = {
-            "lat": float(lat),
-            "t_agent": ato,
-            "t_wall": t_wall,
-            "step_count": self._step_count,
-            "terminated_physics": bool(term_phys),
-            "truncated_physics": bool(trunc_phys),
-        }
-
-        if self._debug:
-            print(
-                "[RL] step action={} lat={:.6f}s ato={:.6f} "
-                "wall={:.6f} rew={:.6f} term={} trunc={}".format(
-                    int(action), lat, ato, t_wall, reward, terminated, truncated
-                )
-            )
-
-        return obs, reward, terminated, truncated, info
-
-    def close(self):
-        """Tell the agent the experiment is over, once."""
-
-        if self._finished:
-            return
-        self._finished = True
-        try:
-            self._comm.stepExpFinished(timeout=self._timeout)
-        except Exception as exc:
-            if self._debug:
-                print(f"[RL] close warning: {exc}")
+    def is_truncated(self, step_count, max_steps):
+        return is_truncated(step_count, max_steps)
 
 
 def parse_args() -> argparse.Namespace:

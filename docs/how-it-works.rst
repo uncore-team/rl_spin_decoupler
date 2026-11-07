@@ -45,9 +45,15 @@ once, so the loop keeps running while the learner thinks.
 Transport
 ---------
 
-Payloads are pickled and sent over TCP, each preceded by its length in 4 bytes. TCP is
-a byte stream, so a single ``send`` on one side does not correspond to a single ``recv``
-on the other, and the length tells the receiver where a message ends.
+Payloads are pickled and sent over TCP, each preceded by a 7-byte header: the magic
+``SD``, the protocol version and the payload length. TCP is a byte stream, so a single
+``send`` on one side does not correspond to a single ``recv`` on the other, and the
+length tells the receiver where a message ends. The magic and the version are checked on
+every frame, so mismatched releases fail with a clear message.
+
+The length comes from the peer, so ``max_frame_size`` (64 MiB by default) bounds it; a
+frame over the limit closes the connection. A send that blocks because the peer stopped
+reading gives up after ``send_timeout`` (10 s by default).
 
 Both ends set ``TCP_NODELAY``. A step is a short request followed by two short replies
 (``LAT`` and the observation). With Nagle's algorithm on, the second reply waits for the
@@ -55,4 +61,7 @@ acknowledgement of the first, and the receiver delays that acknowledgement by up
 40 ms on Linux. On loopback the exchange took 44 ms without the option and 0.14 ms with
 it.
 
-Unpickling data can run arbitrary code, so the two processes must trust each other.
+Unpickling arbitrary data can run arbitrary code. By default the receiver only accepts
+plain data and NumPy arrays and scalars, and refuses any other class; pass
+``allow_pickle=True`` to ``RLSide`` and ``AgentSide`` to send your own classes between
+endpoints you trust.

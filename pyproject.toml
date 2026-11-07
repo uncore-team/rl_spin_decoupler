@@ -29,6 +29,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+gym = [
+    "gymnasium",
+]
 rl = [
     "stable-baselines3",
     "gymnasium",
@@ -54,7 +57,7 @@ docs = [
 ]
 
 [tool.setuptools]
-py-modules = ["spindecoupler"]
+py-modules = ["spindecoupler", "spindecoupler_gym"]
 packages = ["rl_spin_decoupler", "rl_spin_decoupler.socketcomms"]
 include-package-data = false
 license-files = ["LICENSE*"]

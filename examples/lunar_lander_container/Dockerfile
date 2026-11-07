@@ -26,7 +26,7 @@ RUN pip3 install --no-cache-dir torch==2.5.1+cu124 \
     && pip3 install --no-cache-dir -r /tmp/requirements-rl.txt
 
 # The library (whose core is pure standard library) and the example sources.
-COPY pyproject.toml setup.py README.md LICENSE __init__.py spindecoupler.py ./
+COPY pyproject.toml setup.py README.md LICENSE __init__.py spindecoupler.py spindecoupler_gym.py ./
 COPY socketcomms ./socketcomms
 COPY examples/lunar_lander ./examples/lunar_lander
 COPY examples/lunar_lander_container ./examples/lunar_lander_container

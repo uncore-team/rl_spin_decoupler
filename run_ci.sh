@@ -173,6 +173,7 @@ if [ "$RUN_EXAMPLES" -eq 1 ]; then
     tests/test_burger_coppeliasim_deployments.py \
     tests/test_fopcontrol_smoke.py \
     tests/test_fopcontrol_reward_unit.py \
+    tests/test_gym_env.py \
     --override-ini addopts=""
   record "test-examples" $?
 fi

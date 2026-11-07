@@ -1,0 +1,11 @@
+mode,think_ms,median_gap_ms,p99_gap_ms,max_gap_ms,missed_ticks
+coupled,0,20.1,20.9,20.9,0
+coupled,20,20.1,40.9,40.9,19
+coupled,50,20.1,70.8,70.8,19
+coupled,100,20.1,120.9,120.9,19
+coupled,200,20.1,221.1,221.1,19
+decoupled,0,20.1,20.2,20.2,0
+decoupled,20,20.1,20.3,20.3,0
+decoupled,50,20.1,20.3,20.8,0
+decoupled,100,20.1,20.2,20.3,0
+decoupled,200,20.1,20.3,20.3,0

@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "RL Spin Decoupler"
+type: software
+version: 1.2.1
+license: GPL-3.0-only
+repository-code: "https://github.com/uncore-team/rl_spin_decoupler"
+url: "https://uncore-team.github.io/rl_spin_decoupler/"
+abstract: >-
+  A Python library that synchronizes a reinforcement-learning loop with an agent loop
+  that runs in another process and may follow a different clock, and reports the
+  duration of each action and the time of each observation.
+keywords:
+  - reinforcement learning
+  - robotics
+  - sockets
+  - Gymnasium
+authors:
+  - family-names: Fernández-Madrigal
+    given-names: Juan-Antonio
+    email: jafernandez@uma.es
+  - family-names: Arévalo-Espejo
+    given-names: Vicente
+    email: varevalo@uma.es

@@ -98,8 +98,8 @@ to `agent_side_lunarlander.py`, for instance `--render` (it needs a display).
 | `IMAGE` | `lunarlander-rl` | container | Image name |
 | `PYTHON` | `python3` | agent | Interpreter with the agent dependencies |
 
-On a slow or distant link raise `TIMEOUT`. The 60-second wait for the agent to connect
-cannot be changed, so start the agent promptly.
+On a slow or distant link raise `TIMEOUT`. The RL side waits 60 seconds for the agent to
+connect (the `accept_timeout` of `RLSide`, not exposed by the script), so start the agent promptly.
 
 ### The trained model
 
