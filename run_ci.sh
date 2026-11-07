@@ -149,7 +149,12 @@ if [ "$RUN_CORE" -eq 1 ]; then
     --ignore=tests/test_burger_coppeliasim_smoke.py \
     --ignore=tests/test_burger_coppeliasim_reward_unit.py \
     --ignore=tests/test_burger_real_smoke.py \
-    --ignore=tests/test_burger_real_reward_unit.py
+    --ignore=tests/test_burger_real_reward_unit.py \
+    --ignore=tests/test_burger_real_sim_smoke.py \
+    --ignore=tests/test_burger_coppeliasim_deployments.py \
+    --ignore=tests/test_lunarlander_deployments.py \
+    --ignore=tests/test_fopcontrol_smoke.py \
+    --ignore=tests/test_fopcontrol_reward_unit.py
   record "test-core" $?
 fi
 
@@ -159,10 +164,15 @@ if [ "$RUN_EXAMPLES" -eq 1 ]; then
   "$PY" -m pytest \
     tests/test_lunarlander_smoke.py \
     tests/test_lunarlander_reward_unit.py \
-  tests/test_burger_coppeliasim_smoke.py \
-  tests/test_burger_coppeliasim_reward_unit.py \
-  tests/test_burger_real_smoke.py \
-  tests/test_burger_real_reward_unit.py \
+    tests/test_lunarlander_deployments.py \
+    tests/test_burger_coppeliasim_smoke.py \
+    tests/test_burger_coppeliasim_reward_unit.py \
+    tests/test_burger_real_smoke.py \
+    tests/test_burger_real_reward_unit.py \
+    tests/test_burger_real_sim_smoke.py \
+    tests/test_burger_coppeliasim_deployments.py \
+    tests/test_fopcontrol_smoke.py \
+    tests/test_fopcontrol_reward_unit.py \
     --override-ini addopts=""
   record "test-examples" $?
 fi

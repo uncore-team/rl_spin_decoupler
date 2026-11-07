@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-set -e
-# Profile B only: forward a local port to the remote host's loopback, where the
-# container publishes the RL server via `-p 127.0.0.1:PORT:PORT`.
+# Profile B only: forward a local port to the RL container's port on the remote
+# host (published on its loopback). Identical to the bare-host deployment, so this
+# simply runs ../lunar_lander_remote/tunnel.sh.
 #
-# Usage:
-#   ./tunnel.sh user@remote-host [PORT]
-#
-# Then run the agent against 127.0.0.1 (the default of run_agent_local.sh).
-REMOTE="${1:?usage: ./tunnel.sh user@remote-host [port]}"
-PORT="${2:-49054}"
-exec ssh -v -N -L "${PORT}:127.0.0.1:${PORT}" "$REMOTE"
+# Usage:   ./tunnel.sh user@remote-host [PORT]
+exec "$(dirname "${BASH_SOURCE[0]}")/../lunar_lander_remote/tunnel.sh" "$@"

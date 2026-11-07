@@ -7,6 +7,7 @@ established connection before opening a new one. ``end()`` must be a safe no-op
 when the point was never begun.
 """
 
+import socket
 import threading
 import time
 
@@ -125,3 +126,27 @@ def test_server_binds_to_all_interfaces_by_default(free_tcp_port, force_localhos
         server.end()
         thread.join(timeout=2.0)
     assert not errors
+
+
+def test_both_ends_disable_nagle(free_tcp_port, force_localhost):
+    """Small request/reply messages must not wait for delayed ACKs.
+
+    With Nagle's algorithm on, two small writes in a row cost an extra ~40 ms on
+    Linux (see ``BaseCommPoint._disable_nagle``). Check the option on the socket
+    returned by ``accept()`` and on the client socket.
+    """
+
+    ip = BaseCommPoint.get_ip()
+    server = ServerCommPoint(free_tcp_port)
+    thread = threading.Thread(target=server.begin, args=(5.0,), daemon=True)
+    thread.start()
+
+    client = _connect_client_with_retry(ip, free_tcp_port)
+    try:
+        thread.join(timeout=5.0)
+        for point in (client, server):
+            nodelay = point._sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
+            assert nodelay != 0
+    finally:
+        client.end()
+        server.end()

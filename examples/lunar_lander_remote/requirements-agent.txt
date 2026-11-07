@@ -1,2 +1,4 @@
-# Agent-side dependencies. The local agent runs LunarLander's Box2D simulation.
+# Agent-side dependencies (the local host): LunarLander's Box2D physics.
+# Stable-Baselines3 is not needed here. Install the repository first: `pip install -e .`
 gymnasium[box2d]>=0.29,<1.1
+numpy>=1.24

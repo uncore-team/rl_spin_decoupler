@@ -1,0 +1,5 @@
+# Python dependencies of the simulated-Burger demo (pip). rclpy is not listed:
+# it comes with ROS2 Humble. Install the repository itself first: `pip install -e .`
+-r ../burger_real/requirements-agent.txt   # agent side: numpy
+-r ../burger_real/requirements-rl.txt      # RL side: stable-baselines3, gymnasium, numpy
+coppeliasim-zmqremoteapi-client>=2.0       # bridge: CoppeliaSim ZMQ remote API client

@@ -1,0 +1,15 @@
+# Docker build context (the repository root). Keep it small: the images need only
+# the library and the example sources.
+.git
+.github
+.vscode
+.venv
+docs
+tests
+htmlcov
+coverage.xml
+*.egg-info
+**/__pycache__
+**/build
+**/install
+**/log

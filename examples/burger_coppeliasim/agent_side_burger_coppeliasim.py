@@ -1,50 +1,63 @@
 # SPDX-License-Identifier: GPL-3.0-only
+"""Agent side of the CoppeliaSim Burger example.
+
+This process owns the simulator. It connects to a running CoppeliaSim through
+the ZMQ remote API, loads the shared arena scene, and then, on behalf of the RL
+side (``rl_side_burger_coppeliasim.py``, connected through ``spindecoupler``):
+
+* applies the continuous action ``[linear m/s, angular rad/s]`` chosen by the RL
+  side to the robot, and keeps stepping the simulation with it;
+* returns the 10-value observation ``[distance_to_goal, relative_goal_angle,
+  ray_1..ray_8]`` after every RL step and after every reset;
+* repositions robot, target and obstacles when the RL side asks for a reset.
+
+Start CoppeliaSim first (its GUI is fine), then the RL side, then this script;
+``run_demo.sh`` does all of it.
+"""
+
 from __future__ import annotations
 
 import argparse
-from enum import Enum
-import numpy as np
 import os
-from pathlib import Path
+import signal
 import time
-from typing import List, Optional
+from enum import Enum
+from pathlib import Path
 
+import numpy as np
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-
 from episode_config import COLLISION_LIDAR_THRESHOLD, NUM_LIDAR_SECTORS, OBS_DIM
+
 from spindecoupler import AgentSide, BaseCommPoint
 
-# Scene shipped alongside this script (burger_coppeliasim/scene/scene.ttt).
-# Resolved relative to this file so the agent finds it regardless of the
-# process's current working directory.
-DEFAULT_SCENE_PATH = str(Path(__file__).resolve().parent / "scene" / "scene.ttt")
+# The scene is shared with examples/burger_real_sim. It is located from this file
+# so that the working directory does not matter.
+DEFAULT_SCENE_PATH = str(
+    Path(__file__).resolve().parent.parent / "_common" / "burger_scene" / "scene.ttt"
+)
 
 
 class StepState(Enum):
-    READY_FOR_RL_COMMAND = 0
-    EXECUTING_LAST_ACTION = 1
-    AFTER_RESET = 2
+    """Phases of the decoupled control loop."""
+
+    READY_FOR_RL_COMMAND = 0  # waiting for the next command from the RL side
+    EXECUTING_LAST_ACTION = 1  # holding the last action for one RL step period
+    AFTER_RESET = 2  # world repositioned; first observation about to be sent
 
 
 class CoppeliaBurgerAgent:
-    """Agent-side process controlling a CoppeliaSim TurtleBot3 Burger.
+    """
+    Drives the simulated Burger on behalf of the RL side.
 
-    Runs a decoupled state machine identical in spirit to the repo's LunarLander
-    example: a fast control loop (`control_period`) keeps the simulator stepping
-    in real time while a slower RL loop (`rl_step_period`) asynchronously decides
-    the next action.
+    It follows the same loop as the LunarLander agent: a fast control loop keeps the
+    simulation stepping with the current action (`control_period`) while a slower
+    one (`rl_step_period`) decides when to send the next observation.
 
-    Responsibilities of this process:
-    - It computes NO reward: reward and task-level termination live on the RL
-      side (see reward.py).
-    - It DOES detect the PHYSICS termination it is authoritative for -- a
-      collision, from its LiDAR stream (COLLISION_LIDAR_THRESHOLD in
-      episode_config.py) -- and transports it in the payload as ``terminated``.
-      On a real robot this is where battery / e-stop / bumper events would also
-      be raised. The RL side ORs this with the task goal check and its own step
-      budget.
-    - On a physics done, the agent freezes stepping and waits for the RL-driven
-      reset (a single reset), instead of auto-resetting locally.
+    It computes no reward. It does detect the one thing only it can see, a
+    collision, from the LiDAR readings (COLLISION_LIDAR_THRESHOLD in
+    episode_config.py), and sends it as ``terminated``. On a collision it freezes the
+    robot and waits for the reset instead of resetting by itself. The RL side adds
+    the goal check and its own step budget.
     """
 
     def __init__(
@@ -56,42 +69,39 @@ class CoppeliaBurgerAgent:
         timeout: float,
         sim_host: str = "127.0.0.1",
         sim_port: int = 23000,
-        scene_path: Optional[str] = None,
+        scene_path: str | None = None,
         debug: bool = False,
     ):
         if rl_step_period <= control_period:
-            raise ValueError("rl_step_period must be strictly greater than control_period")
+            raise ValueError(
+                "rl_step_period must be strictly greater than control_period"
+            )
 
         self._debug = debug
         self._timeout = timeout
         self._rl_step_period = rl_step_period
         self._control_period = control_period
 
-        # 1. ZMQ connection to CoppeliaSim.
         self._client = RemoteAPIClient(host=sim_host, port=sim_port)
         self._sim = self._client.require("sim")
 
-        # 2. Load the scene and enable real-time stepping BEFORE resolving any
-        #    scene object (getObject("/Orchestrator") below would fail on an
-        #    empty/wrong scene).
+        # The scene has to be loaded before /Orchestrator can be looked up.
         self._load_scene(scene_path)
         orchestrator_object = self._sim.getObject("/Orchestrator")
         if orchestrator_object <= 0:
             raise RuntimeError(
-                "The loaded scene does not contain an '/Orchestrator' object. "
-                "Attach the Orchestrator child script to an object with that "
-                "alias and save scene/scene.ttt."
+                "The loaded scene has no '/Orchestrator' object; use "
+                "examples/_common/burger_scene/scene.ttt (see its README)."
             )
         self._orchestrator_handle = self._sim.getScript(
             self._sim.scripttype_childscript, orchestrator_object
         )
         if self._orchestrator_handle <= 0:
             raise RuntimeError(
-                "The '/Orchestrator' object has no child script. "
-                "Attach the Orchestrator script and save scene/scene.ttt."
+                "The '/Orchestrator' object has no child script; use "
+                "examples/_common/burger_scene/scene.ttt (see its README)."
             )
 
-        # 3. Decoupling socket (AgentSide).
         self._comm = AgentSide(ip, port, verbose=debug)
 
         self._state = StepState.READY_FOR_RL_COMMAND
@@ -106,14 +116,13 @@ class CoppeliaBurgerAgent:
 
         self._reset_workspace()
 
-    def _load_scene(self, scene_path: Optional[str]) -> None:
-        """Stop any running simulation, load `scene_path`, and enable real-time mode.
+    def _load_scene(self, scene_path: str | None) -> None:
+        """
+        Stop any running simulation, load the scene and switch on real-time mode.
 
-        Real-time mode makes CoppeliaSim's internal clock track the wall
-        clock as closely as it can, matching the wall-clock-driven
-        control_period/rl_step_period loop in `spinloop()` -- without it the
-        simulator would step as fast as the physics engine allows,
-        decoupling sim-time from the real time this loop assumes.
+        Real-time mode makes the simulation clock follow the wall clock, which is what
+        the loop in ``spinloop()`` assumes. Without it CoppeliaSim would step as fast as
+        it can and simulation time would drift away from real time.
         """
         path = os.path.abspath(scene_path) if scene_path else DEFAULT_SCENE_PATH
         if not os.path.isfile(path):
@@ -128,20 +137,17 @@ class CoppeliaBurgerAgent:
         self._sim.setBoolParam(self._sim.boolparam_realtime_simulation, True)
         print(f"[AGENT] Loaded scene '{path}' (real-time simulation enabled)")
 
-    def _null_action(self) -> List[float]:
-        """Neutral action: [v=0.0 m/s, w=0.0 rad/s]."""
+    def _null_action(self) -> list[float]:
         return [0.0, 0.0]
 
-    def _apply_action(self, action: List[float]) -> None:
-        """Store the continuous action to be applied in the simulator."""
+    def _apply_action(self, action: list[float]) -> None:
         self._last_action = [float(action[0]), float(action[1])]
 
     def _build_observation(self) -> np.ndarray:
         return self._obs
 
     def _is_collision(self, obs: np.ndarray) -> bool:
-        """Detect a physics collision from the LiDAR sectors of the observation."""
-        lidar_min = float(np.min(obs[0:NUM_LIDAR_SECTORS]))
+        lidar_min = float(np.min(obs[2 : 2 + NUM_LIDAR_SECTORS]))
         return lidar_min <= COLLISION_LIDAR_THRESHOLD
 
     def _build_transport_payload(
@@ -154,23 +160,24 @@ class CoppeliaBurgerAgent:
         }
 
     def _reset_workspace(self) -> None:
-        """Trigger the CoppeliaSim episode reset and store the first observation."""
+        """Reset the episode in CoppeliaSim and keep the first observation."""
         if self._sim.getSimulationState() == self._sim.simulation_stopped:
             self._sim.startSimulation()
 
-        raw_obs = self._sim.callScriptFunction("reset_episode", self._orchestrator_handle)
+        raw_obs = self._sim.callScriptFunction(
+            "reset_episode", self._orchestrator_handle
+        )
         self._obs = np.asarray(raw_obs, dtype=np.float32)
         self._term_latched = False
         self._frozen = False
         self._last_action = self._null_action()
 
     def _run_control_tick(self) -> None:
-        """Run one control tick: apply the current action and read fresh sensors.
+        """
+        Step the simulation once with the current action.
 
-        orchestrator.py's step_episode() only ever returns the raw observation.
-        The physics termination this process owns (a collision) is detected here
-        from that observation; once raised, the finished episode is frozen until
-        the RL-driven reset arrives.
+        The orchestrator only returns the observation; the collision is detected here
+        from it. Once raised, the episode stays frozen until the reset arrives.
         """
         if self._frozen:
             return
@@ -184,7 +191,13 @@ class CoppeliaBurgerAgent:
             self._frozen = True
 
     def spinloop(self) -> None:
-        """Run the decoupled state machine, identical in spirit to LunarLander."""
+        """
+        Serve the RL side until it sends FINISH.
+
+        Each iteration steps the simulation, so the robot keeps moving while the RL side
+        thinks, and then either sends the observation (once ``rl_step_period`` has
+        elapsed) or polls for the next command.
+        """
         print("[AGENT] Running CoppeliaSim Burger loop")
         try:
             while True:
@@ -193,8 +206,7 @@ class CoppeliaBurgerAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
-                        # No reward here. Report the physics termination flag;
-                        # stay frozen until the RL side drives the reset.
+                        # A collided episode stays frozen until the RL side resets it.
                         self._comm.stepSendObs(
                             self._build_transport_payload(
                                 terminated=self._term_latched, truncated=False
@@ -203,7 +215,7 @@ class CoppeliaBurgerAgent:
                         )
                         if self._debug:
                             print(
-                                f"[AGENT] Sent transition obs action={self._last_action} "
+                                f"[AGENT] Sent obs action={self._last_action} "
                                 f"terminated={self._term_latched}"
                             )
                         self._state = StepState.READY_FOR_RL_COMMAND
@@ -241,40 +253,68 @@ class CoppeliaBurgerAgent:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CoppeliaSim Agent-side wrapper")
-    parser.add_argument("--ip", default=BaseCommPoint.get_ip(), help="RL-side IPv4 address")
+    parser.add_argument(
+        "--ip", default=BaseCommPoint.get_ip(), help="RL-side IPv4 address"
+    )
     parser.add_argument("--port", type=int, default=49054, help="RL-side TCP port")
-    parser.add_argument("--rl-step-period", type=float, default=0.08, help="RL action step period")
-    parser.add_argument("--control-period", type=float, default=0.01, help="Sim tick period")
-    parser.add_argument("--timeout", type=float, default=1.0, help="Timeout readWhatToDo")
+    parser.add_argument(
+        "--rl-step-period",
+        type=float,
+        default=0.08,
+        help="Seconds each RL action is executed (wall clock); "
+        "must exceed --control-period",
+    )
+    parser.add_argument(
+        "--control-period",
+        type=float,
+        default=0.01,
+        help="Seconds between simulation steps / polls (wall clock)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="Seconds to wait for a pending RL command before stepping again",
+    )
     parser.add_argument(
         "--scene-path",
         type=str,
         default=None,
-        help="Path to the .ttt scene to load (default: scene/scene.ttt next to this script)",
+        help="Scene (.ttt) to load (default: examples/_common/burger_scene/scene.ttt)",
     )
-    parser.add_argument("--sim-host", default="127.0.0.1", help="CoppeliaSim ZMQ remote API host")
-    parser.add_argument("--sim-port", type=int, default=23000, help="CoppeliaSim ZMQ remote API port")
+    parser.add_argument(
+        "--sim-host", default="127.0.0.1", help="CoppeliaSim ZMQ remote API host"
+    )
+    parser.add_argument(
+        "--sim-port", type=int, default=23000, help="CoppeliaSim ZMQ remote API port"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose logs")
     return parser.parse_args()
 
 
+def _raise_keyboard_interrupt(*_) -> None:
+    raise KeyboardInterrupt
+
+
 def main() -> None:
     args = parse_args()
-    agent = CoppeliaBurgerAgent(
-        ip=args.ip,
-        port=args.port,
-        rl_step_period=args.rl_step_period,
-        control_period=args.control_period,
-        timeout=args.timeout,
-        sim_host=args.sim_host,
-        sim_port=args.sim_port,
-        scene_path=args.scene_path,
-        debug=args.debug,
-    )
+    # Let `kill` (SIGTERM) stop the simulation cleanly, like Ctrl+C does.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     try:
+        agent = CoppeliaBurgerAgent(
+            ip=args.ip,
+            port=args.port,
+            rl_step_period=args.rl_step_period,
+            control_period=args.control_period,
+            timeout=args.timeout,
+            sim_host=args.sim_host,
+            sim_port=args.sim_port,
+            scene_path=args.scene_path,
+            debug=args.debug,
+        )
         agent.spinloop()
     except KeyboardInterrupt:
-        print("[AGENT] Interrupted by user")
+        print("[AGENT] Interrupted")
 
 
 if __name__ == "__main__":

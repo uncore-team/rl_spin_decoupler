@@ -1,10 +1,9 @@
-# Lunar Lander example dependencies.
+# Python dependencies of the LunarLander example (pip).
+# Install the repository itself first: `pip install -e .`
 #
-# The Box2D physics engine is needed here, since LunarLander's simulation runs in
-# the agent process on the local host. The RL side only builds the SB3 policy
-# and computes the learning signal, so it needs just Stable-Baselines3 + torch
-# (gymnasium is used only for its spaces / Env base class).
-#
-stable-baselines3==2.5.0
-gymnasium[box2d]>=0.29,<1.1
-coppeliasim_zmqremoteapi_client
+# The agent runs LunarLander's Box2D physics, the RL side runs PPO; on a single
+# machine both need to be installed. Split deployments install only their half
+# (see examples/lunar_lander_remote and examples/lunar_lander_container).
+stable-baselines3==2.5.0       # RL side: PPO (pulls in PyTorch)
+gymnasium[box2d]>=0.29,<1.1    # agent side: LunarLander physics; RL side: spaces
+numpy>=1.24

@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""RL-side SB3 demo using rl_spin_decoupler and LunarLander.
+"""
+RL side of the LunarLander example: PPO training.
 
-Run this process first. It starts the RL-side server and trains PPO on a
-Gymnasium-like environment wrapper that exchanges data with an external
-agent process via sockets.
+Run it first. It opens the server socket and trains a Stable-Baselines3 PPO
+policy on a Gymnasium environment whose ``step()`` and ``reset()`` are answered
+by the agent process (agent_side_lunarlander.py) through spindecoupler, and waits
+up to 60 s for the agent to connect.
 
-Reward and task-level termination/truncation are computed HERE, on the RL side,
-from the received observation (see reward.py). The agent only transports the
-observation, timing, and the physics termination flags emitted by Gymnasium.
+Reward and the task-level end of the episode are computed here, from the
+observation (see reward.py). The agent only sends the observation, its timing and
+the physics flags of Gymnasium.
 """
 
 from __future__ import annotations
@@ -21,21 +23,19 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from reward import compute_reward, is_terminated, is_truncated
 from stable_baselines3 import PPO
 
-from reward import compute_reward, is_terminated, is_truncated
 from spindecoupler import RLSide
 
 
 class DecoupledLunarLanderEnv(gym.Env):
-    """Gymnasium environment backed by rl_spin_decoupler communications.
+    """
+    Gymnasium environment whose steps are served by the agent.
 
-    The RL algorithm interacts with this object as with a standard Gymnasium env.
-    Actions/observations are transported over sockets. Reward is computed HERE on
-    the RL side from the received observation; termination combines the physics
-    flag transported by the agent (crash / out-of-bounds / Gymnasium time limit)
-    with the task-level landing check, and truncation combines that physics flag
-    with the RL-side step budget.
+    Reward comes from the received observation. An episode terminates when the agent
+    reports a physics end or the lander has landed, and is truncated when the agent
+    reports its time limit or the RL-side step budget runs out.
     """
 
     metadata = {"render_modes": []}
@@ -63,11 +63,7 @@ class DecoupledLunarLanderEnv(gym.Env):
         self.action_space = spaces.Discrete(4)
 
     def _parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
-        """Decode the agent payload into (obs, terminated, truncated).
-
-        The agent wraps every observation as
-        ``{"observation": <vec>, "terminated": bool, "truncated": bool}``.
-        """
+        """Split the agent's payload into observation, terminated and truncated."""
 
         if isinstance(payload, dict):
             obs_payload = payload.get("observation", payload)
@@ -87,28 +83,18 @@ class DecoupledLunarLanderEnv(gym.Env):
         return obs, terminated, truncated
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        """Request reset on agent side and return the initial observation."""
-
         super().reset(seed=seed)
         payload, ato = self._comm.resetGetObs(timeout=self._timeout)
         obs, _terminated, _truncated = self._parse_payload(payload)
         self._step_count = 0
         self._prev_obs = obs.copy()
 
-        info: dict[str, Any] = {}
-        info.update({"t_agent": ato, "step_count": self._step_count})
+        info: dict[str, Any] = {"t_agent": ato, "step_count": self._step_count}
         if self._debug:
             print(f"[RL] reset ato={ato:.6f} obs={obs.tolist()}")
         return obs, info
 
     def step(self, action):
-        """Send action, receive observation, compute reward on the RL side.
-
-        - Reward is computed HERE via reward.py::compute_reward.
-        - ``terminated`` = physics flag from the agent OR task-level landing.
-        - ``truncated`` = physics flag from the agent OR RL-side step budget.
-        """
-
         # The transported reward slot is unused: reward is computed here.
         lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
             int(action), timeout=self._timeout
@@ -119,23 +105,18 @@ class DecoupledLunarLanderEnv(gym.Env):
 
         self._step_count += 1
         terminated = bool(term_phys or is_terminated(obs))
-        truncated = bool(
-            trunc_phys or is_truncated(self._step_count, self._max_steps)
-        )
+        truncated = bool(trunc_phys or is_truncated(self._step_count, self._max_steps))
         self._prev_obs = obs.copy()
 
         t_wall = time.time()
-        info: dict[str, Any] = {}
-        info.update(
-            {
-                "lat": float(lat),
-                "t_agent": ato,
-                "t_wall": t_wall,
-                "step_count": self._step_count,
-                "terminated_physics": bool(term_phys),
-                "truncated_physics": bool(trunc_phys),
-            }
-        )
+        info: dict[str, Any] = {
+            "lat": float(lat),
+            "t_agent": ato,
+            "t_wall": t_wall,
+            "step_count": self._step_count,
+            "terminated_physics": bool(term_phys),
+            "truncated_physics": bool(trunc_phys),
+        }
 
         if self._debug:
             print(
@@ -148,7 +129,7 @@ class DecoupledLunarLanderEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def close(self):
-        """Signal experiment end to agent side once."""
+        """Tell the agent the experiment is over, once."""
 
         if self._finished:
             return
@@ -161,8 +142,6 @@ class DecoupledLunarLanderEnv(gym.Env):
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments for this executable demo."""
-
     parser = argparse.ArgumentParser(
         description="SB3 PPO RL-side demo with decoupled LunarLander agent"
     )
@@ -179,16 +158,25 @@ def parse_args() -> argparse.Namespace:
         help="Maximum RL steps per episode before truncation",
     )
     parser.add_argument(
+        "--n-steps",
+        type=int,
+        default=2048,
+        help="PPO rollout length: steps collected between policy updates. PPO "
+        "always completes a whole rollout, so this is also the minimum number of "
+        "steps a run executes. Use a small value for quick runs.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=5.0,
-        help="Timeout in seconds per decoupler communication operation",
+        help="Seconds to wait for each agent reply. Raise it if the agent can "
+        "be slow to answer (e.g. a remote host over a slow link).",
     )
     parser.add_argument(
         "--model-path",
         type=str,
         default="examples/lunar_lander/ppo_lunar_lander_decoupled.zip",
-        help="Output path for the trained SB3 model",
+        help="Where to save the trained SB3 model (.zip)",
     )
     parser.add_argument(
         "--seed", type=int, default=7, help="Random seed used by PPO and env reset"
@@ -212,10 +200,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_rollout(model: PPO, env: DecoupledLunarLanderEnv, rollout_steps: int) -> None:
-    """Run a short rollout and print mean LAT for timing observability."""
+    """Run ``rollout_steps`` steps with the trained policy and print the mean LAT."""
 
-    obs, info = env.reset()
-    _ = info
+    obs, _info = env.reset()
     lats: list[float] = []
 
     for _ in range(rollout_steps):
@@ -223,8 +210,7 @@ def run_rollout(model: PPO, env: DecoupledLunarLanderEnv, rollout_steps: int) ->
         obs, _reward, terminated, truncated, info = env.step(action)
         lats.append(float(info["lat"]))
         if terminated or truncated:
-            obs, info = env.reset()
-            _ = info
+            obs, _info = env.reset()
 
     if lats:
         mean_lat = float(np.mean(np.asarray(lats, dtype=np.float32)))
@@ -234,8 +220,6 @@ def run_rollout(model: PPO, env: DecoupledLunarLanderEnv, rollout_steps: int) ->
 
 
 def main() -> None:
-    """Train PPO using the decoupled Gymnasium wrapper."""
-
     args = parse_args()
     env = DecoupledLunarLanderEnv(
         port=args.port,
@@ -245,14 +229,16 @@ def main() -> None:
     )
     try:
         env.reset(seed=args.seed)
-        # 20k steps are kept small for quick execution. Solving LunarLander often
-        # needs around 1e6 timesteps with tuned hyperparameters and reward design.
+        # The default of 20k steps keeps the demo short. Solving LunarLander often
+        # needs around 1e6 steps with tuned hyperparameters and reward design.
         model = PPO(
             "MlpPolicy",
             env,
             verbose=1,
             seed=args.seed,
             device=args.device,
+            n_steps=args.n_steps,
+            batch_size=min(64, args.n_steps),
         )
         print(f"[RL] torch device: {model.device}")
         model.learn(total_timesteps=args.timesteps)

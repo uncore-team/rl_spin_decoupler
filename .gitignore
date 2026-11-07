@@ -20,4 +20,8 @@ docs/_build/
 dist/
 build/
 site/
+install/
+log/
 *.zip
+# Pre-trained policy used by examples/burger_real and examples/burger_real_sim
+!examples/burger_real/training_8rays_fixedtime.zip

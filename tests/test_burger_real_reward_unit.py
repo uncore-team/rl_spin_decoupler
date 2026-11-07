@@ -26,7 +26,7 @@ spec.loader.exec_module(reward)
 
 
 def observation(*, lidar_min: float = 1.0, distance: float = 1.0) -> list[float]:
-    return [lidar_min] + [1.0] * 7 + [distance, 0.0]
+    return [distance, 0.0, lidar_min] + [1.0] * 7
 
 
 def test_collision_and_goal_boundaries():

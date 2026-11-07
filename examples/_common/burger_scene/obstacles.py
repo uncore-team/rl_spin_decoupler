@@ -7,19 +7,29 @@ positions. Reads the arena's *actual* size through
 `arena.py::getExternalWallParams()` instead of a hardcoded arena size.
 """
 
-import common
-
 import math
 import random
 from typing import Any, Dict, List, Optional, Tuple
+
+import common
 
 sim = None
 self_handle = None
 
 _SCHEMA: Dict[str, Any] = {
     "n_obstacles": {"default": 8, "minimum": 0, "maximum": 200, "type": "int"},
-    "diam_obstacles": {"default": 0.12, "minimum": 0.01, "maximum": 1.0, "type": "float"},
-    "height_obstacles": {"default": 0.25, "minimum": 0.01, "maximum": 2.0, "type": "float"},
+    "diam_obstacles": {
+        "default": 0.12,
+        "minimum": 0.01,
+        "maximum": 1.0,
+        "type": "float",
+    },
+    "height_obstacles": {
+        "default": 0.25,
+        "minimum": 0.01,
+        "maximum": 2.0,
+        "type": "float",
+    },
     "flag_grid": {"default": True, "type": "bool"},
     "grid_visible": {"default": False, "type": "bool"},
     "quads_x": {"default": 2, "minimum": 1, "maximum": 8, "type": "int"},
@@ -79,8 +89,12 @@ def _collect_occupied_positions() -> List[Tuple[float, float, float]]:
 
 
 def _is_position_valid(
-    rx: float, ry: float, obs_radius: float,
-    occupied: List[Tuple[float, float, float]], max_x: float, max_y: float,
+    rx: float,
+    ry: float,
+    obs_radius: float,
+    occupied: List[Tuple[float, float, float]],
+    max_x: float,
+    max_y: float,
 ) -> bool:
     if abs(rx) > max_x or abs(ry) > max_y:
         return False
@@ -90,9 +104,6 @@ def _is_position_valid(
     return True
 
 
-# ----------------------------------------------------------------------------
-# Geometry
-# ----------------------------------------------------------------------------
 def rebuild(
     config: Optional[Dict[str, Any]] = None,
     positions: Optional[List[Tuple[float, float]]] = None,
@@ -124,7 +135,12 @@ def rebuild(
             for iy in range(cfg["quads_y"])
             for dy in range(1, cfg["grid_rows_per_quad"] + 1)
         ]
-        cells = [(x, y) for x in x_coords for y in y_coords if abs(x) <= max_x and abs(y) <= max_y]
+        cells = [
+            (x, y)
+            for x in x_coords
+            for y in y_coords
+            if abs(x) <= max_x and abs(y) <= max_y
+        ]
 
     def _place(rx: float, ry: float, idx: int) -> None:
         obs = sim.createPrimitiveShape(
@@ -132,7 +148,9 @@ def rebuild(
             [cfg["diam_obstacles"], cfg["diam_obstacles"], cfg["height_obstacles"]],
             0,
         )
-        sim.setObjectPosition(obs, sim.handle_world, [rx, ry, cfg["height_obstacles"] / 2.0])
+        sim.setObjectPosition(
+            obs, sim.handle_world, [rx, ry, cfg["height_obstacles"] / 2.0]
+        )
         sim.setObjectAlias(obs, f"Obstacle{idx}")
         sim.setObjectParent(obs, self_handle, True)
         sim.setObjectSpecialProperty(
@@ -172,14 +190,10 @@ def rebuild(
     return self_handle
 
 
-# ----------------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------------
 def setObsParams(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Update obstacle config and rebuild -- only if `params` is given.
+    """Update the obstacle config and rebuild, only if `params` is given.
 
-    Calling with no arguments returns the current config without side
-    effects (safe to use as a getter).
+    Called without arguments it returns the current config and changes nothing.
     """
     cur = _with_defaults(params)
     if params:
@@ -188,9 +202,6 @@ def setObsParams(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return cur
 
 
-# ----------------------------------------------------------------------------
-# CoppeliaSim lifecycle
-# ----------------------------------------------------------------------------
 def init(simulation: Any) -> None:
     global sim, self_handle
 

@@ -1,16 +1,11 @@
 Quick Start
 ===========
 
-Minimal control flow
---------------------
+Two processes take part. The RL process decides when to reset and which action to apply
+next; the agent process applies the actions, samples observations and, if it wants,
+computes a reward. Start the RL process first, because it is the one that listens.
 
-The library coordinates two processes:
-
-1. An RL process that decides when to reset and which action to apply next.
-2. An agent process that executes actions, samples observations, and optionally
-   computes rewards.
-
-At a high level, the RL side does this:
+The RL side:
 
 .. code-block:: python
 
@@ -23,7 +18,7 @@ At a high level, the RL side does this:
    lat, obs1, rew1, ato1 = rl.stepSendActGetObs(action)
    rl.stepExpFinished()
 
-And the agent side does this:
+The agent side:
 
 .. code-block:: python
 
@@ -48,11 +43,9 @@ And the agent side does this:
 Timing values
 -------------
 
-For a complete executable two-process demo, see ``examples/README.md`` in the
-repository root.
+``LAT`` is the duration of the previous action, and ``ATO`` is the time at which an
+observation was sampled; the agent's clock measures both. ``t_wall`` is not produced by
+the library: RL code usually reads it with ``time.time()`` when a result arrives, and it
+belongs to the RL process's clock.
 
-- ``LAT`` is the duration of the previous action, measured by the agent clock.
-- ``ATO`` is the agent-side time when an observation was sampled.
-- ``t_wall`` is not produced by the library itself; it is typically captured by
-  user code on the RL side with ``time.time()`` when the RL process receives a
-  result.
+The repository has complete, runnable examples in ``examples/README.md``.

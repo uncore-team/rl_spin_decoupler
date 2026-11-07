@@ -1,7 +1,4 @@
-# agent-side dependencies.
-#
-# Stable-Baselines3 is not needed here, since the agent process only runs the simulation
-# and sends the learning signal to the RL process. The Box2D physics engine is needed 
-# here, since LunarLander's simulation runs in the agent process on the local host.
-#
+# Agent-side dependencies (the local host): LunarLander's Box2D physics.
+# Stable-Baselines3 is not needed here. Install the repository first: `pip install -e .`
 gymnasium[box2d]>=0.29,<1.1
+numpy>=1.24

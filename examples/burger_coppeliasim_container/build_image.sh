@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-set -e
+# Build the RL-side image. Run it from anywhere; the build context is the
+# repository root. Extra arguments go to `docker build`, e.g. --no-cache.
+#
+# Usage:   ./build_image.sh [docker build options]
+# Environment variables: IMAGE (image name, default burger-coppelia-rl)
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."   # repository root
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-exec docker build -f "$SCRIPT_DIR/Dockerfile" -t burger-coppelia-rl "$REPO_ROOT"
+exec docker build "$@" -f examples/burger_coppeliasim_container/Dockerfile \
+  -t "${IMAGE:-burger-coppelia-rl}" .

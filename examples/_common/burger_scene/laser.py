@@ -4,12 +4,23 @@
 Exposes `get_rl_observation() -> list[float]`: the minimum detected distance
 per 45-degree sector (8 sectors covering 360 degrees), clamped to
 `config["max_scan_distance"]`.
+
+This script is ROS2-agnostic. The external ROS2 bridge
+(examples/burger_real_sim) turns these 8 sectors into a
+`sensor_msgs/msg/LaserScan` on `/scan`; the scene only computes them.
+
+The 8 sectors are bucketized by each point's angle **in the robot frame**,
+not in the originating vision sensor's own local frame: the 3 sensors are
+mounted at different yaw offsets (each covers 120 deg of the total 360), so
+using the sensor-local angle would mix up sectors coming from different
+physical directions around the robot.
 """
 
 import math
 from typing import Any, Dict, List, Optional
 
 sim = None
+
 robot_handle: Optional[int] = None
 vision_sensor_handles: List[int] = []
 
@@ -18,7 +29,7 @@ vision_sensor_handles: List[int] = []
 collection_handle: Optional[int] = None
 
 config: Dict[str, Any] = {
-    "max_scan_distance": 1.0,
+    "max_scan_distance": 8.0,
     "scanning_angle_deg": 360.0,
     "show_lines": [False, False, False],
     "show_points": False,
@@ -33,15 +44,14 @@ points: Optional[int] = None
 not_first_here: bool = False
 
 
-# ----------------------------------------------------------------------------
-# RL-facing API
-# ----------------------------------------------------------------------------
 def get_rl_observation() -> List[float]:
     """Public API for orchestrator.py: 8 floats, min distance per sector."""
     return sectors
 
 
-def _process_sensor_data(sensor_handle: int, show_line: bool, show_pt: bool) -> float:
+def _process_sensor_data(
+    sensor_handle: int, show_line: bool, show_pt: bool, robot_inv_matrix: List[float]
+) -> float:
     global sectors
     min_dist_overall = math.inf
     _res, _, aux2 = sim.readVisionSensor(sensor_handle)
@@ -49,7 +59,16 @@ def _process_sensor_data(sensor_handle: int, show_line: bool, show_pt: bool) -> 
     if aux2 and len(aux2) >= 2:
         m1 = sim.getObjectMatrix(sensor_handle, sim.handle_world)
         width, height = int(aux2[0]), int(aux2[1])
-        p_zero = sim.multiplyVector(m1, [0.0, 0.0, 0.0])
+        p_zero = (
+            sim.multiplyVector(m1, [0.0, 0.0, 0.0]) if (show_line or show_pt) else None
+        )
+
+        # Compose world->robot with sensor->world once per sensor. The result is
+        # a 3x4 row-major matrix [R | t]; only the robot-frame x and y of each
+        # point are needed, so the loop below applies it locally. (A sim.*
+        # call per point would be an inter-process call each: ~360 per step,
+        # which made the scene run at about a third of real time.)
+        m = sim.multiplyMatrices(robot_inv_matrix, m1)
 
         for j in range(height):
             for i in range(width):
@@ -57,16 +76,29 @@ def _process_sensor_data(sensor_handle: int, show_line: bool, show_pt: bool) -> 
                 v1, v2, v3, v4 = aux2[w : w + 4]
 
                 if v4 <= config["max_scan_distance"]:
-                    p_world = sim.multiplyVector(m1, [v1, v2, v3])
-                    if show_line and lines:
-                        sim.addDrawingObjectItem(
-                            lines, [p_zero[0], p_zero[1], p_zero[2], p_world[0], p_world[1], p_world[2]]
-                        )
-                    if show_pt and points:
-                        sim.addDrawingObjectItem(points, p_world)
+                    if show_line or show_pt:
+                        p_world = sim.multiplyVector(m1, [v1, v2, v3])
+                        if show_line and lines:
+                            sim.addDrawingObjectItem(
+                                lines,
+                                [
+                                    p_zero[0],
+                                    p_zero[1],
+                                    p_zero[2],
+                                    p_world[0],
+                                    p_world[1],
+                                    p_world[2],
+                                ],
+                            )
+                        if show_pt and points:
+                            sim.addDrawingObjectItem(points, p_world)
 
-                    # Angle relative to the sensor's own local frame.
-                    angle = math.atan2(v2, v1)
+                    # The angle is taken in the robot's frame, common to the 3
+                    # sensors, not in the frame of the sensor that saw the point
+                    # (see the module docstring).
+                    x = m[0] * v1 + m[1] * v2 + m[2] * v3 + m[3]
+                    y = m[4] * v1 + m[5] * v2 + m[6] * v3 + m[7]
+                    angle = math.atan2(y, x)
                     sector_idx = int((math.degrees(angle) + 180) / 45) % 8
                     sectors[sector_idx] = min(sectors[sector_idx], v4)
 
@@ -76,9 +108,6 @@ def _process_sensor_data(sensor_handle: int, show_line: bool, show_pt: bool) -> 
     return min_dist_overall
 
 
-# ----------------------------------------------------------------------------
-# CoppeliaSim lifecycle
-# ----------------------------------------------------------------------------
 def rebuild() -> None:
     global lines, points
     if lines:
@@ -96,8 +125,12 @@ def rebuild() -> None:
             s, sim.visionintparam_entity_to_render, collection_handle
         )
 
-    lines = sim.addDrawingObject(sim.drawing_lines, 1, 0, -1, 1000, config["color_lines"])
-    points = sim.addDrawingObject(sim.drawing_points, 3, 0, -1, 1000, config["color_points"])
+    lines = sim.addDrawingObject(
+        sim.drawing_lines, 1, 0, -1, 1000, config["color_lines"]
+    )
+    points = sim.addDrawingObject(
+        sim.drawing_points, 3, 0, -1, 1000, config["color_points"]
+    )
 
 
 def init(simulation: Any) -> None:
@@ -113,12 +146,14 @@ def init(simulation: Any) -> None:
 
     rebuild()
 
+
 def actuation() -> None:
     pass
 
+
 def sensing() -> None:
     global sectors, not_first_here
-    sectors = [config["max_scan_distance"]] * 8  # reset to max range every tick
+    sectors = [config["max_scan_distance"]] * 8
 
     if not_first_here:
         if lines:
@@ -126,8 +161,17 @@ def sensing() -> None:
         if points:
             sim.addDrawingObjectItem(points, None)
 
-        for i, s in enumerate(vision_sensor_handles):
-            _process_sensor_data(s, config["show_lines"][i], config["show_points"])
+        # Computed once per tick so all sensors use the same robot frame.
+        robot_matrix = sim.getObjectMatrix(robot_handle, sim.handle_world)
+        robot_inv_matrix = sim.getMatrixInverse(robot_matrix)
+
+        for i, sensor in enumerate(vision_sensor_handles):
+            _process_sensor_data(
+                sensor,
+                config["show_lines"][i],
+                config["show_points"],
+                robot_inv_matrix,
+            )
 
     not_first_here = True
 

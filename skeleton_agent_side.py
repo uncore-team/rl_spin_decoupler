@@ -1,130 +1,94 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-""" 
-AGENT PART OF THE RL-AGENT DECOUPLING EXAMPLE
-Start this after the other.
+"""
+Template for the agent side of a decoupled setup.
+
+Start this process after the RL side, which is the one that listens. The agent
+runs its own fast loop and polls the RL side without blocking; each "..." marks
+something you have to supply. The RL counterpart is in skeleton_rl_side.py.
 """
 
-# imports
+import time
 from enum import Enum
-from spindecoupler import AgentSide
+from typing import Any
 
+from spindecoupler import AgentSide, BaseCommPoint
 
 
 class Agent:
-	"""The agent"""
+    """Control loop of the robot or simulator."""
 
-	class StepState(Enum):
-		"""
-		States of the agent when enters its step() method
-		"""
-		READYFORRLCOMMAND = 0	# Ready for a new RL command
-		EXECUTINGLASTACTION = 1	# Executing the last action
-		AFTERRESET = 2	# After a previous (immediate) reset
+    class StepState(Enum):
+        READYFORRLCOMMAND = 0  # waiting for the next command from the RL side
+        EXECUTINGLASTACTION = 1  # holding the last action until the RL step ends
+        AFTERRESET = 2  # reset done; the first observation is still to be sent
 
+    def __init__(self, debug: bool = False) -> None:
+        self._debug = debug
+        self._rltimestep = 0.1  # seconds per RL action; must exceed the control one
+        self._control_timestep = 0.02  # seconds per iteration of the local loop
+        if self._rltimestep <= self._control_timestep:
+            raise ValueError("RL timestep must be > control timestep")
 
-	def __init__(self, debug = False) -> None:
-	
-		self._control_timestep = ... # timestep of the step() cycle in the agent
-		self._rltimestep = ... # timestep of a RL step (not of an Agent step; the timestep of the Agent step is self._control_timestep)
-		if self._rltimestep <= self._control_timestep:
-			raise(ValueError("RL timestep must be > control timestep"))
+        self._stepstate = Agent.StepState.READYFORRLCOMMAND
+        self._lastaction = self._null_action()
+        self._lastactiont0 = time.time()
+        self._commstoRL = AgentSide(BaseCommPoint.get_ip(), 49054, verbose=debug)
 
-		self._stepstate = Agent.StepState.READYFORRLCOMMAND
-		self._lastaction = None
-		self._lastactiont0 = 0.0
-		self._starttimecurepisode = 0.0
-			
-		self._commstoRL = AgentSide(BaseCommPoint.get_ip(),49054,verbose = debug) # wait til connecting to RL
-	
-		self._debug = debug
-		
-		print("Agent created.")
+    def step(self) -> Any:
+        """One iteration of the loop: advance the state machine, apply the action."""
+        now = time.time()
 
+        if self._stepstate == Agent.StepState.EXECUTINGLASTACTION:
+            if now - self._lastactiont0 >= self._rltimestep:
+                self._commstoRL.stepSendObs(self._build_observation(), agenttime=now)
+                self._stepstate = Agent.StepState.READYFORRLCOMMAND
 
+        elif self._stepstate == Agent.StepState.READYFORRLCOMMAND:
+            whattodo = self._commstoRL.readWhatToDo()  # None if nothing is pending
+            if whattodo is not None:
+                what, payload = whattodo
 
-	def step(self, timestep) -> np.ndarray:
-		"""A step for the agent: timestep includes the observation).
-		It also manages episodic resets."""
+                if what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+                    # LAT must be sent before the observation.
+                    self._commstoRL.stepSendLastActDur(now - self._lastactiont0)
+                    self._lastactiont0 = now
+                    self._lastaction = payload
+                    self._stepstate = Agent.StepState.EXECUTINGLASTACTION
 
-		if self._debug:
-			print("Step")
+                elif what == AgentSide.WhatToDo.RESET_SEND_OBS:
+                    self._reset_workspace()
+                    self._lastaction = self._null_action()
+                    self._lastactiont0 = now
+                    self._stepstate = Agent.StepState.AFTERRESET
 
-		act = self._lastaction	# by default, continue executing the same last action
-		curtime = ... # get aget current time
+                elif what == AgentSide.WhatToDo.FINISH:
+                    raise RuntimeError("Experiment finished")
 
-		if self._stepstate == Agent.StepState.EXECUTINGLASTACTION: 
-			# --- not waiting new commands from RL, just executing last action
-		
-			if (curtime - self._lastactiont0 >= self._rltimestep): 
-				# last action is finished by now
-			
-				observation = ... # gather observation
-				self._commstoRL.stepSendObs(observation,curtime) 
-				self._stepstate = Agent.StepState.READYFORRLCOMMAND
+        elif self._stepstate == Agent.StepState.AFTERRESET:
+            self._commstoRL.resetSendObs(self._build_observation(), agenttime=now)
+            self._stepstate = Agent.StepState.READYFORRLCOMMAND
 
-		elif self._stepstate == Agent.StepState.READYFORRLCOMMAND: 
-			# --- waiting for new RL step() or reset() command from RL
-		 
-			# read the last (pending) step()/reset() indicator 
-			whattodo = self._commstoRL.readWhatToDo()
-			if self._debug:
-				print("\tNew command: {}".format(whattodo))
-			if whattodo is not None: # otherwise, no command available yet
-					
-				if whattodo[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+        self._apply_action(self._lastaction)
+        return self._lastaction
 
-					actrec = whattodo[1]
+    def spinloop(self) -> None:
+        while True:
+            self.step()
+            time.sleep(self._control_timestep)
 
-					lat = curtime - self._lastactiont0
-					self._lastactiont0 = curtime
-					self._commstoRL.stepSendLastActDur(lat)
-					self._stepstate = Agent.StepState.EXECUTINGLASTACTION 
-					# from now on, we are executing that action
+    def _build_observation(self):
+        return ...
 
-				elif whattodo[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
+    def _apply_action(self, action: Any) -> None:
+        ...
 
-					... # do reset the agent scenario / episode
+    def _reset_workspace(self) -> None:
+        ...
 
-					act = ... # null action
-					self._starttimecurepisode = curtime
-					self._stepstate = Agent.StepState.AFTERRESET 
-					# prepare to send an observation right after this
-
-				elif whattodo[0] == AgentSide.WhatToDo.FINISH:
-				
-					raise RuntimeError("Experiment finished")
-					
-				else:
-					raise(ValueError("Unknown indicator data"))
-
-		elif self._stepstate == Agent.StepState.AFTERRESET: 
-			# --- must send the pending observation after the last reset
-		
-			observation = ... # gather observation
-			self._commstoRL.resetSendObs(observation,curtime)
-			self._stepstate = Agent.StepState.READYFORRLCOMMAND
-			if self._debug:
-				print("\tObservation sent after reset: {}".format(observation))
-				
-				
-		if self._debug:
-			print("Step panda -- end")
-		self._lastaction = act
-		return act	 # to be executed now by Panda
+    def _null_action(self):
+        return ...
 
 
-
-if __name__ == '__main__':
-
-	# initialize agent
-
-	"""
-	main loop
-	"""
-
-	agent = Agent(env,False)
-
-	agent.spinloop()...
-
-
+if __name__ == "__main__":
+    Agent(debug=True).spinloop()

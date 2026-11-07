@@ -1,3 +1,4 @@
-# Dependencies for the local CoppeliaSim agent.
+# Agent-side dependencies (the local host, next to CoppeliaSim). Stable-Baselines3
+# is not needed here. Install the repository first: `pip install -e .`
 numpy>=1.24
-coppeliasim-zmqremoteapi-client>=2.0
+coppeliasim-zmqremoteapi-client>=2.0   # CoppeliaSim ZMQ remote API client

@@ -1,9 +1,24 @@
-"""ROS2 agent node for the real TurtleBot3 Burger example."""
+"""Agent side of the real TurtleBot3 Burger example (a ROS2 node).
+
+The node subscribes to ``/scan``, ``/odom`` and ``/goal_pose`` (plus TF
+``map -> odom``), builds the 10-value observation
+``[distance_to_goal, relative_goal_angle, ray_1..ray_8]`` and forwards it to the
+RL process through the ``spindecoupler`` socket. The action it receives back
+(``[linear_x, angular_z]``) is published on ``/cmd_vel``.
+
+Episode handling follows the decoupler protocol. The agent detects the *physics*
+end of an attempt (LiDAR collision, stale sensors) and freezes the robot; goal
+reached and the step budget are decided on the RL side. On every RL reset the
+agent stops the robot and blocks until a *new* ``/goal_pose`` message arrives --
+whoever plays the operator (a human, a mission node, or the simulator bridge in
+``examples/burger_real_sim``) starts each attempt by publishing a goal.
+"""
 
 from __future__ import annotations
 
 import argparse
 import math
+import sys
 import time
 from enum import Enum
 
@@ -12,6 +27,8 @@ import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
+from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
@@ -35,13 +52,22 @@ from .contract import (
 
 
 class StepState(Enum):
-    READY_FOR_RL_COMMAND = 0
-    EXECUTING_LAST_ACTION = 1
-    AFTER_RESET = 2
+    """Phases of the decoupled control loop."""
+
+    READY_FOR_RL_COMMAND = 0  # waiting for the next command from the RL side
+    EXECUTING_LAST_ACTION = 1  # holding the last action for one RL step period
+    AFTER_RESET = 2  # reset done; the first observation is about to be sent
 
 
 class BurgerRealAgent(Node):
-    """Bridge ROS2 sensors/commands and the decoupler agent-side protocol."""
+    """Bridge ROS2 sensors/commands and the decoupler agent-side protocol.
+
+    Two clocks are involved. ``control_period`` is how often sensors are polled
+    and the (held) action is re-published; ``rl_step_period`` is how long each
+    RL action is executed before the next observation is returned. Both are
+    wall-clock seconds. ``sensor_timeout`` is the longest tolerated silence from
+    ``/scan``, ``/odom`` and ``/goal_pose`` before the attempt is truncated.
+    """
 
     def __init__(
         self,
@@ -77,6 +103,10 @@ class BurgerRealAgent(Node):
         self._goal: PoseStamped | None = None
         self._sensor_sequence = 0
         self._last_sensor_time = 0.0
+        # Tracks /goal_pose arrivals independently of scan/odom, so a reset can
+        # block until a genuinely new destination is published (see _wait_for_new_goal).
+        self._goal_sequence = 0
+        self._last_consumed_goal_sequence = 0
         self._state = StepState.READY_FOR_RL_COMMAND
         self._last_action = [0.0, 0.0]
         self._last_action_start = time.monotonic()
@@ -86,7 +116,10 @@ class BurgerRealAgent(Node):
         self._frozen = False
 
         self._wait_for_sensor_data()
-        self._refresh_observation()
+        # The goal already present at startup counts as consumed for episode 1.
+        # _wait_for_sensor_data() already refreshed self._obs on success; no
+        # need to (and must not, to avoid an unguarded TF race) call it again.
+        self._last_consumed_goal_sequence = self._goal_sequence
 
     def _scan_callback(self, message: LaserScan) -> None:
         self._scan = message
@@ -98,6 +131,7 @@ class BurgerRealAgent(Node):
 
     def _goal_callback(self, message: PoseStamped) -> None:
         self._goal = message
+        self._goal_sequence += 1
         self._mark_sensor_update()
 
     def _mark_sensor_update(self) -> None:
@@ -113,9 +147,29 @@ class BurgerRealAgent(Node):
                 and self._goal is not None
                 and self._sensor_sequence > previous_sequence
             ):
-                self._refresh_observation()
+                try:
+                    self._refresh_observation()
+                except TransformException:
+                    # map -> odom TF discovery/first message can lag behind
+                    # /scan, /odom and /goal_pose; keep waiting instead of crashing.
+                    continue
                 return
         raise RuntimeError("ROS2 shutdown while waiting for Burger sensor data")
+
+    def _wait_for_new_goal(self) -> None:
+        """Block (stopped) until a /goal_pose newer than the last consumed one."""
+        self.get_logger().info("Waiting for a new /goal_pose ...")
+        previous_goal_sequence = self._last_consumed_goal_sequence
+        while rclpy.ok():
+            self._spin_once()
+            if self._goal_sequence > previous_goal_sequence:
+                try:
+                    self._refresh_observation()
+                except TransformException:
+                    continue
+                self._last_consumed_goal_sequence = self._goal_sequence
+                return
+        raise RuntimeError("ROS2 shutdown while waiting for a new Burger goal")
 
     def _spin_once(self) -> None:
         rclpy.spin_once(self, timeout_sec=0.0)
@@ -135,7 +189,10 @@ class BurgerRealAgent(Node):
         distance = math.hypot(dx, dy)
         relative_angle = normalize_angle(math.atan2(dy, dx) - yaw)
         sectors = self._scan_sectors(self._scan)
-        self._obs = np.asarray(sectors + [distance, relative_angle], dtype=np.float32)
+        self._obs = np.asarray(
+            [distance, relative_angle] + sectors,
+            dtype=np.float32,
+        )
 
     def _goal_in_odom(self) -> tuple[float, float]:
         assert self._goal is not None
@@ -147,12 +204,11 @@ class BurgerRealAgent(Node):
                 f"Unsupported goal frame '{self._goal.header.frame_id}'; "
                 f"expected '{GOAL_FRAME}' or '{ODOM_FRAME}'"
             )
-        try:
-            transform = self._tf_buffer.lookup_transform(
-                ODOM_FRAME, GOAL_FRAME, rclpy.time.Time()
-            )
-        except TransformException as exc:
-            raise RuntimeError("TF map -> odom is unavailable") from exc
+        # Left uncaught: callers decide whether a missing TF is fatal (mid-run)
+        # or just "not ready yet" (startup/reset, see _wait_for_sensor_data).
+        transform = self._tf_buffer.lookup_transform(
+            ODOM_FRAME, GOAL_FRAME, rclpy.time.Time()
+        )
         translation = transform.transform.translation
         rotation = transform.transform.rotation
         transform_yaw = math.atan2(
@@ -219,8 +275,19 @@ class BurgerRealAgent(Node):
             self._frozen = True
             self._publish_stop()
             return
-        self._refresh_observation()
-        if float(np.min(self._obs[:NUM_LIDAR_SECTORS])) <= COLLISION_LIDAR_THRESHOLD:
+        try:
+            self._refresh_observation()
+        except TransformException:
+            # map -> odom TF momentarily unavailable (e.g. localization restart);
+            # truncate this attempt instead of crashing the whole agent node.
+            self._trunc_latched = True
+            self._frozen = True
+            self._publish_stop()
+            return
+        if (
+            float(np.min(self._obs[2 : 2 + NUM_LIDAR_SECTORS]))
+            <= COLLISION_LIDAR_THRESHOLD
+        ):
             self._term_latched = True
             self._frozen = True
             self._publish_stop()
@@ -250,12 +317,11 @@ class BurgerRealAgent(Node):
                     if command is not None:
                         what, payload = command
                         if what == AgentSide.WhatToDo.RESET_SEND_OBS:
-                            sequence = self._sensor_sequence
                             self._term_latched = False
                             self._trunc_latched = False
                             self._frozen = False
                             self._publish_stop()
-                            self._wait_for_sensor_data(sequence)
+                            self._wait_for_new_goal()
                             self._last_action_start = time.monotonic()
                             self._state = StepState.AFTER_RESET
                         elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
@@ -268,25 +334,56 @@ class BurgerRealAgent(Node):
                         elif what == AgentSide.WhatToDo.FINISH:
                             return
                 time.sleep(self._control_period)
+        except KeyboardInterrupt:
+            pass
         finally:
-            self._publish_stop()
+            if rclpy.ok():
+                self._publish_stop()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ROS2 real Burger agent")
-    parser.add_argument("--ip", default=BaseCommPoint.get_ip())
-    parser.add_argument("--port", type=int, default=49054)
-    parser.add_argument("--rl-step-period", type=float, default=0.08)
-    parser.add_argument("--control-period", type=float, default=0.01)
-    parser.add_argument("--timeout", type=float, default=1.0)
-    parser.add_argument("--sensor-timeout", type=float, default=1.0)
-    parser.add_argument("--debug", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--ip", default=BaseCommPoint.get_ip(), help="IPv4 address of the RL side"
+    )
+    parser.add_argument(
+        "--port", type=int, default=49054, help="TCP port of the RL side"
+    )
+    parser.add_argument(
+        "--rl-step-period",
+        type=float,
+        default=0.08,
+        help="Seconds each RL action is executed (wall clock); "
+        "must exceed --control-period",
+    )
+    parser.add_argument(
+        "--control-period",
+        type=float,
+        default=0.01,
+        help="Seconds between sensor polls / action re-publications (wall clock)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="Seconds to wait for a pending RL command before polling sensors again",
+    )
+    parser.add_argument(
+        "--sensor-timeout",
+        type=float,
+        default=1.0,
+        help="Seconds of sensor silence tolerated before truncating the attempt. "
+        "Raise it if the sensors can be slow (e.g. a simulator below real time).",
+    )
+    parser.add_argument("--debug", action="store_true", help="Verbose transport logs")
+    # Strip ROS2-injected tokens (--ros-args, -p key:=value, --) so this
+    # node's own flags can be passed as: ros2 run ... -- --ip ... --port ...
+    return parser.parse_args(remove_ros_args(sys.argv)[1:])
 
 
 def main() -> None:
     args = parse_args()
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     agent = None
     try:
         agent = BurgerRealAgent(
@@ -302,7 +399,8 @@ def main() -> None:
     finally:
         if agent is not None:
             agent.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

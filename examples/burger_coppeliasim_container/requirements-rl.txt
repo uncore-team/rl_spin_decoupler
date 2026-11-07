@@ -1,4 +1,5 @@
-# Dependencies installed in the remote RL container.
+# RL-side dependencies, installed in the container image. The simulator runs on the
+# local agent. PyTorch is installed separately by the Dockerfile (a CUDA 12.4 build).
 stable-baselines3==2.5.0
-gymnasium>=0.29,<1.1
+gymnasium>=0.29,<1.1       # only for its spaces and Env base class
 numpy>=1.24

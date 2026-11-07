@@ -1,4 +1,5 @@
-# Dependencies for the remote RL process.
-stable-baselines3==2.5.0
-gymnasium>=0.29,<1.1
+# RL-side dependencies (the remote host): SAC. The simulator runs on the agent.
+# Install the repository first: `pip install -e .`
+stable-baselines3==2.5.0   # pulls in PyTorch; install a CUDA build first for GPU training
+gymnasium>=0.29,<1.1       # only for its spaces and Env base class
 numpy>=1.24

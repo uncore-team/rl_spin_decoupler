@@ -6,8 +6,10 @@ import math
 
 NUM_LIDAR_SECTORS = 8
 OBS_DIM = NUM_LIDAR_SECTORS + 2
-LIDAR_MAX_RANGE = 1.0
-COLLISION_LIDAR_THRESHOLD = 0.14
+
+# Contract used by training_8rays_fixedtime.zip: distance, angle, then rays.
+LIDAR_MAX_RANGE = 8.0
+COLLISION_LIDAR_THRESHOLD = 0.16
 GOAL_DIST_THRESHOLD = 0.10
 
 SCAN_TOPIC = "/scan"
@@ -17,8 +19,8 @@ CMD_VEL_TOPIC = "/cmd_vel"
 ODOM_FRAME = "odom"
 GOAL_FRAME = "map"
 
-LINEAR_VELOCITY_LIMIT = 0.22
-ANGULAR_VELOCITY_LIMIT = 2.84
+LINEAR_VELOCITY_LIMIT = 0.15
+ANGULAR_VELOCITY_LIMIT = 0.6
 
 
 def normalize_angle(angle: float) -> float:

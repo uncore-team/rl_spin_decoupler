@@ -1,42 +1,28 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Shared helpers and constants for the CoppeliaSim Burger arena scripts.
+"""Shared constants and config helpers for the Burger arena scripts.
 
-Import this module from every config-driven child script (arena.py,
-obstacles.py, target.py) and from orchestrator.py:
+Imported as ``import common`` by every other script of the scene. It is a plain
+module with no ``sysCall_*`` handlers.
 
-    import common
+The scene is intentionally ROS2-agnostic: no script here imports ``simROS2`` or
+decides when an episode ends. Everything is driven from outside through the
+ZMQ remote API (see ``orchestrator.py`` for the public surface), so the very
+same scene serves the RL training example (``examples/burger_coppeliasim``) and
+the ROS2 bridge example (``examples/burger_real_sim``).
 
-It is a plain Python module with no `sysCall_*` handlers of its own. It
-exists so the config-schema boilerplate that used to be copy-pasted across
-arena.py / obstacles.py / target.py, and the scene's object names / shared
-physical constants, live in exactly one place instead of N slightly
-different copies.
-
-NOTE on how this module reaches the other scripts: this project links each
-scene script as an external .py file (via CoppeliaSim's file-based /
-"include" scripting, see the accompanying delivery notes) rather than
-embedding code in the .ttt. That is what makes a plain `import scene_common`
-resolve here. If your CoppeliaSim setup instead requires an explicit
-`require`/`include` directive for Python child scripts, add it before this
-import -- the functions below don't care how they were pulled in.
+Each object's child script inside ``scene.ttt`` is a tiny wrapper that does
+``import <module>`` and forwards the ``sysCall_*`` hooks, so the ``.py`` files
+must stay next to the ``.ttt`` (see README.md for the wrapper contract).
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
-
-# ---------------------------------------------------------------------------
-# Canonical scene object paths.
-#
-# These are best-effort names inferred from the original scripts (they used
-# to disagree with each other -- e.g. orchestrator.py referred to "/tu_robot"
-# and "/diana" while obstacles.py referred to "/Burger" and "/Target").
-# Verify these against your actual scene tree and edit ONLY here if they
-# differ; every other script resolves objects through this dict instead of
-# hardcoding a path of its own.
-# ---------------------------------------------------------------------------
-SCENE_NAMES: Dict[str, str] = {
+# Scene object paths. CoppeliaSim resolves a partial alias path, so
+# "/Burger/Laser" also matches "/Burger/scan_joint/Laser". Every script looks
+# objects up through this dict; edit it only here if the scene tree changes.
+SCENE_NAMES: dict[str, str] = {
     "robot": "/Burger",
     "target": "/Target",
     "walls": "/Walls",
@@ -52,7 +38,7 @@ ROBOT_RADIUS = 0.25
 TARGET_RADIUS = 0.20
 
 
-def clamp(value: float, minimum: Optional[float], maximum: Optional[float]) -> float:
+def clamp(value: float, minimum: float | None, maximum: float | None) -> float:
     """Clamp `value` into [minimum, maximum]; a None bound is ignored."""
     if minimum is not None and value < minimum:
         value = minimum
@@ -92,11 +78,11 @@ def _coerce(default: Any, value: Any) -> Any:
 
 
 def merge_config(
-    defaults: Dict[str, Any],
-    stored: Optional[Dict[str, Any]],
-    user_cfg: Optional[Dict[str, Any]],
-    schema: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    defaults: dict[str, Any],
+    stored: dict[str, Any] | None,
+    user_cfg: dict[str, Any] | None,
+    schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Merge `user_cfg` over `stored` over `defaults`, coercing and clamping.
 
     This is the common body behind every `_with_defaults()` helper that used
@@ -105,7 +91,7 @@ def merge_config(
     stored = stored or {}
     user_cfg = user_cfg or {}
     schema = schema or {}
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
 
     for key, default_value in defaults.items():
         raw = user_cfg.get(key, stored.get(key, default_value))
@@ -121,30 +107,29 @@ def merge_config(
     return merged
 
 
-def read_config(sim: Any, handle: int, defaults: Dict[str, Any]) -> Dict[str, Any]:
+def read_config(sim: Any, handle: int, defaults: dict[str, Any]) -> dict[str, Any]:
     """Read the `__config__` custom data, falling back to `defaults` if absent."""
     return sim.readCustomTableData(handle, "__config__") or dict(defaults)
 
 
-def write_config(sim: Any, handle: int, config: Dict[str, Any]) -> None:
+def write_config(sim: Any, handle: int, config: dict[str, Any]) -> None:
     sim.writeCustomTableData(handle, "__config__", config)
 
 
-def write_schema(sim: Any, handle: int, schema: Dict[str, Any]) -> None:
+def write_schema(sim: Any, handle: int, schema: dict[str, Any]) -> None:
     sim.writeCustomBufferData(handle, "__schema__", sim.packTable(schema))
 
 
-def read_schema(sim: Any, handle: int) -> Dict[str, Any]:
+def read_schema(sim: Any, handle: int) -> dict[str, Any]:
     raw = sim.readCustomBufferData(handle, "__schema__")
     return sim.unpackTable(raw) if raw else {}
 
 
 def remove_child_shapes(sim: Any, node: int) -> None:
-    """Remove every shape object under `node` (used before rebuilding generated geometry).
+    """Remove every shape under `node` (used before rebuilding generated geometry).
 
-    Filters by `sim.object_shape_type` consistently -- one of the scripts
-    this replaces used `sim.handle_all` instead, which would also delete any
-    non-shape children (dummies, sensors, ...) if that node ever grew one.
+    It filters by `sim.object_shape_type` so that dummies or sensors added under
+    the node later are not deleted along with the generated shapes.
     """
     children = sim.getObjectsInTree(node, sim.object_shape_type, 1) or []
     valid = [child for child in children if child is not None and child > 0]

@@ -3,19 +3,19 @@
 """Unit tests for the CoppeliaSim Burger RL-side reward contract."""
 
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 
 def _load_module(module_name: str, filename: str):
-    examples_dir = Path(__file__).resolve().parents[1] / "examples" / "burger_coppeliasim"
-    sys.path.insert(0, str(examples_dir))
-    spec = importlib.util.spec_from_file_location(
-        module_name, examples_dir / filename
+    examples_dir = (
+        Path(__file__).resolve().parents[1] / "examples" / "burger_coppeliasim"
     )
+    sys.path.insert(0, str(examples_dir))
+    spec = importlib.util.spec_from_file_location(module_name, examples_dir / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load Burger example module: {filename}")
     module = importlib.util.module_from_spec(spec)
@@ -29,7 +29,7 @@ reward = _load_module("burger_reward", "reward.py")
 def _observation(
     *, lidar_min: float = 1.0, distance: float = 1.0, angle: float = 0.0
 ) -> list[float]:
-    return [lidar_min] + [1.0] * 7 + [distance, angle]
+    return [distance, angle, lidar_min] + [1.0] * 7
 
 
 def test_compute_reward_accepts_dict_payload_and_numpy_action():

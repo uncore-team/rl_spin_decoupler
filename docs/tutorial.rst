@@ -1,17 +1,10 @@
 Tutorial: End-to-End Loop
 =========================
 
-This tutorial shows the complete control cycle that the package is designed to
-support.
-
-Scenario
---------
-
-Assume you have:
-
-- an RL environment wrapper running in one process,
-- a robot or simulator control loop running in another process,
-- a need to preserve timing information from the agent side.
+This tutorial follows one complete cycle: a reset, some steps, and the end of the
+experiment. The setup is an RL environment wrapper in one process and the control
+loop of a robot or simulator in another, with the timing measured by the agent
+reaching the learner.
 
 RL-side wrapper
 ---------------
@@ -46,7 +39,8 @@ The RL process owns the server socket and blocks until the agent connects.
 Agent-side loop
 ---------------
 
-The agent loop polls the socket without blocking when no RL command is pending.
+The agent polls the socket on every iteration and carries on with its own work when the
+RL side has sent nothing.
 
 .. code-block:: python
 
@@ -88,24 +82,19 @@ The agent loop polls the socket without blocking when no RL command is pending.
                elif what == AgentSide.WhatToDo.FINISH:
                    break
 
-Execution order
----------------
+Order of execution
+------------------
 
-1. Start the RL process first so the server socket is ready.
-2. Start the agent process and connect to the RL socket.
-3. Call ``resetGetObs()`` from the RL side.
-4. For each RL step, call ``stepSendActGetObs(action)``.
-5. When learning is finished, call ``stepExpFinished()`` once.
+1. Start the RL process, so the server socket exists.
+2. Start the agent process, which connects to it.
+3. Call ``resetGetObs()`` on the RL side.
+4. Call ``stepSendActGetObs(action)`` for each RL step.
+5. Call ``stepExpFinished()`` once, when learning is over.
 
-Why the timing metadata matters
--------------------------------
+Why the timing values matter
+----------------------------
 
-The RL process and the agent process do not necessarily share the same notion of
-time. The library keeps those clocks separate instead of pretending they are the
-same.
-
-- ``LAT`` tells the RL side how long the previous action actually executed on
-  the agent side.
-- ``ATO`` tells the RL side when the observation was sampled on the agent side.
-- ``t_wall`` can be added by the RL code itself to record when the data arrived
-  locally.
+The two processes do not share a notion of time, and the library keeps their clocks
+apart. ``LAT`` is how long the previous action really lasted on the agent, ``ATO`` is
+when the agent sampled the observation, and ``t_wall`` is something the RL code can add
+to record when the answer arrived locally.

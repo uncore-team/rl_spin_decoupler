@@ -7,9 +7,21 @@ trajectory drawing. `reset_pose(x, y, yaw)` is the single place that knows
 odometry frame); orchestrator.py decides *where* (spawn sampling within the
 real arena bounds) and calls this function instead of teleporting the robot
 itself.
+
+This script is ROS2-agnostic. It produces robot-level data only:
+- wheel velocity control driven through `set_velocity()`;
+- odometry, as the robot's pose relative to `odom_dummy` (a reference frame
+  re-anchored at every `reset_pose()`), exposed through `get_odom_pose()`.
+
+The external ROS2 bridge (examples/burger_real_sim) reads that odometry via
+orchestrator.get_ros_state() and turns it into `/odom` + the
+`map -> odom -> base_link` TF chain. Likewise `/cmd_vel` does not arrive
+here through a simROS2 subscription: the bridge receives it and calls
+`set_velocity()` through the ZMQ remote API, exactly like the training
+example drives `step_episode()`.
 """
 
-from typing import Any, List
+from typing import Any, Dict, List
 
 WHEEL_BASE = 0.16
 WHEEL_RADIUS = 0.033
@@ -24,13 +36,9 @@ class State:
 
     odom_dummy = None
     initial_pos: List[float] = []
-    initial_quat: List[float] = []
     pose_gt = None
 
 
-# ----------------------------------------------------------------------------
-# Control
-# ----------------------------------------------------------------------------
 def set_velocity(v: float, w: float) -> None:
     """Apply inverse differential-drive kinematics and drive the wheel joints.
 
@@ -47,13 +55,23 @@ def set_velocity(v: float, w: float) -> None:
     State.sim.addDrawingObjectItem(State.pose_gt, p)
 
 
+def stop() -> None:
+    """Zero the wheels immediately.
+
+    Called by orchestrator.ros_reset() (via the bridge's operator role) right
+    before a mission reset, so the robot doesn't carry a stale velocity into
+    the teleport.
+    """
+    set_velocity(0.0, 0.0)
+
+
 def reset_pose(x: float, y: float, yaw: float = 0.0) -> None:
     """Teleport the robot to (x, y, yaw) in world coordinates for a new episode.
 
-    Keeps the original spawn height recorded in sysCall_init and re-anchors
-    the odometry reference frame (odom_dummy) at the new pose. Stops the
-    wheels and forces a dynamics reset first, so the physics engine doesn't
-    fight the teleport.
+    Keeps the original spawn height recorded in init() and re-anchors the
+    odometry reference frame (odom_dummy) at the new pose. Stops the wheels
+    and forces a dynamics reset first, so the physics engine doesn't fight
+    the teleport.
     """
     sim = State.sim
 
@@ -76,9 +94,26 @@ def reset_pose(x: float, y: float, yaw: float = 0.0) -> None:
     sim.addDrawingObjectItem(State.pose_gt, None)
 
 
-# ----------------------------------------------------------------------------
-# CoppeliaSim lifecycle
-# ----------------------------------------------------------------------------
+# Odometry readout (consumed by orchestrator.get_ros_state / the ROS2 bridge)
+def get_odom_pose() -> Dict[str, List[float]]:
+    """Return the robot's pose in the odometry frame, plus that frame in world.
+
+    - `pos` / `quat`: the robot pose relative to `odom_dummy` (i.e. the pose
+      of `base_link` in `odom`), which is what `/odom` carries.
+    - `map_pos` / `map_quat`: `odom_dummy`'s own world pose (i.e. the pose of
+      `odom` in `map`), which is what the `map -> odom` TF carries. It is
+      re-anchored at every reset_pose(), matching a real navigation stack
+      where odometry drifts within a fixed map.
+    """
+    sim = State.sim
+    return {
+        "pos": list(sim.getObjectPosition(State.robot, State.odom_dummy)),
+        "quat": list(sim.getObjectQuaternion(State.robot, State.odom_dummy)),
+        "map_pos": list(sim.getObjectPosition(State.odom_dummy, sim.handle_world)),
+        "map_quat": list(sim.getObjectQuaternion(State.odom_dummy, sim.handle_world)),
+    }
+
+
 def init(simulation: Any) -> None:
     State.sim = simulation
     sim = State.sim
@@ -88,12 +123,7 @@ def init(simulation: Any) -> None:
     State.motor_left = sim.getObject("/wheel_left_joint")
     State.motor_right = sim.getObject("/wheel_right_joint")
 
-    # caster_visual = sim.getObject("/caster_back_link_visual")
-    # sim.setObjectInt32Param(caster_visual, sim.shapeintparam_static, 1)
-    # sim.setObjectInt32Param(caster_visual, sim.shapeintparam_respondable, 0)
-
     State.initial_pos = sim.getObjectPosition(State.robot, sim.handle_world)
-    State.initial_quat = sim.getObjectQuaternion(State.robot, sim.handle_world)
 
     # Reference dummy for odometry, re-anchored at every reset_pose() call.
     robot_alias = sim.getObjectAlias(State.robot, 3)
@@ -106,7 +136,9 @@ def init(simulation: Any) -> None:
     sim.setObjectQuaternion(State.odom_dummy, sim.handle_world, q)
 
     # Ground-truth trajectory drawing.
-    State.pose_gt = sim.addDrawingObject(sim.drawing_linestrip, 3, 0, sim.handle_world, 1000, [1, 0, 0])
+    State.pose_gt = sim.addDrawingObject(
+        sim.drawing_linestrip, 3, 0, sim.handle_world, 1000, [1, 0, 0]
+    )
 
     print("[Coppelia] Burger robot script initialized.")
 

@@ -1,25 +1,24 @@
-# LunarLander split deployment: RL in a remote GPU container, agent local
+# LunarLander with the RL side in a GPU container
 
-This example runs the decoupled LunarLander demo across two machines. The RL
-side runs in an NVIDIA/CUDA container on a remote Ubuntu 22.04 GPU host, while
-the local agent runs Gymnasium `LunarLander-v3` and its Box2D physics.
+The [LunarLander example](../lunar_lander/README.md) with its two processes on two
+machines. The RL side, which trains PPO and computes the reward, runs in an
+NVIDIA/CUDA Docker container on a remote Ubuntu 22.04 GPU host. The agent, which runs
+the LunarLander physics, runs on the local host. It is the container counterpart of
+[`lunar_lander_remote`](../lunar_lander_remote/README.md).
 
-## What it demonstrates
+```
+ local host                                     remote GPU host (Docker)
+ agent_side_lunarlander.py  --- TCP :49054 -->  container: rl_side_lunarlander.py
+ (LunarLander physics)      <--- or SSH ----    (PPO, reward, CUDA)
+```
 
-- `run_rl_container.sh` starts the remote `RLSide` server in a GPU-enabled
-  Docker container, trains PPO, and computes the learning signal.
-- `run_agent_local.sh` starts the local agent, which owns the simulation and
-  transports observations, physics flags, and timing.
-- Profile A connects directly on a shared LAN; Profile B publishes only the
-  remote loopback port and forwards it over SSH with `tunnel.sh`.
+`RLSide` is the socket server, so the container listens and the local agent connects. The
+container must therefore start first.
 
-`RLSide` is the socket server, so the remote host listens and the local agent
-initiates the connection.
+## Installation
 
-## Requirements and installation
-
-The remote host needs a recent NVIDIA driver for CUDA 12.4 (approximately
-550+), Docker, and the NVIDIA Container Toolkit. Configure the runtime once:
+The remote host needs an NVIDIA driver recent enough for CUDA 12.4 (550 or newer), Docker
+and the NVIDIA Container Toolkit. Configure the runtime once:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
@@ -28,22 +27,26 @@ sudo systemctl restart docker
 docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 ```
 
-On the local host, install the package and the agent dependencies:
+The image is built the first time the container starts, or with `./build_image.sh`. It
+downloads PyTorch, so the first build takes a while and the image is several GB. It
+holds the RL side only and has no Box2D.
+
+The local host needs the package and the agent dependencies:
 
 ```bash
 pip install -e .
 pip install -r examples/lunar_lander_container/requirements-agent.txt
 ```
 
-The container installs the RL-side package and dependencies itself. It does
-not need `gymnasium[box2d]` because the local agent runs the simulation.
+`gymnasium[box2d]` may need `swig`, `build-essential` and `python3-dev` to build. The
+agent scripts run `python3` from the active environment (`PYTHON` overrides it).
 
-## Running (correct order)
+## Running
 
-Start the remote RL container before the local agent. It waits up to 60
-seconds for the agent connection.
+Start the container first. The RL side waits 60 seconds for the agent once it is
+listening.
 
-### Profile A: same LAN
+### Same LAN (profile A)
 
 On the remote host, from the repository root:
 
@@ -51,17 +54,14 @@ On the remote host, from the repository root:
 ./examples/lunar_lander_container/run_rl_container.sh A --timesteps 20000
 ```
 
-Allow TCP port `49054` from the local machine in the remote firewall. Then on
-the local host run:
+The container uses host networking, so it listens on the host's LAN interface. Allow TCP
+port 49054 from the local machine in the remote firewall. On the local host:
 
 ```bash
 ./examples/lunar_lander_container/run_agent_local.sh <REMOTE_LAN_IP>
 ```
 
-This profile uses Docker host networking, so the container listens directly on
-the remote host's LAN interface.
-
-### Profile B: SSH tunnel
+### SSH tunnel (profile B)
 
 On the remote host:
 
@@ -69,40 +69,74 @@ On the remote host:
 ./examples/lunar_lander_container/run_rl_container.sh B --timesteps 20000
 ```
 
-On the local host, open the tunnel in one terminal:
+The port is published on the remote loopback only, so nothing is exposed. On the local
+host, open the tunnel in one terminal and leave it running:
 
 ```bash
 ./examples/lunar_lander_container/tunnel.sh user@remote-host
 ```
 
-Then start the agent in a second terminal:
+Then start the agent in another terminal. It connects to `127.0.0.1` by default:
 
 ```bash
 ./examples/lunar_lander_container/run_agent_local.sh
 ```
 
-Profile B publishes the container server only on remote loopback, so nothing
-is exposed publicly. `PORT` defaults to `49054`, `DEVICE` defaults to `cuda`,
-and arguments after `A` or `B` are forwarded to `rl_side_lunarlander.py`.
+If the local port is busy, pick another one with
+`./tunnel.sh user@remote-host 49054 50000` and start the agent with `PORT=50000`.
+
+### Options
+
+Arguments after the profile go to `rl_side_lunarlander.py`. Arguments after the host go
+to `agent_side_lunarlander.py`, for instance `--render` (it needs a display).
+
+| Variable | Default | Script | Meaning |
+|---|---|---|---|
+| `PORT` | `49054` | both | TCP port of the RL side |
+| `DEVICE` | `cuda` | container | `cuda` passes `--gpus all`; `cpu` runs without the NVIDIA runtime |
+| `TIMEOUT` | `10` | both | RL: seconds to wait for each agent reply. Agent: seconds to wait for a pending command |
+| `IMAGE` | `lunarlander-rl` | container | Image name |
+| `PYTHON` | `python3` | agent | Interpreter with the agent dependencies |
+
+On a slow or distant link raise `TIMEOUT`. The 60-second wait for the agent to connect
+cannot be changed, so start the agent promptly.
+
+### The trained model
+
+The model is saved on the remote host and survives the container. `--model-path` takes a
+path on the host, and its directory is mounted into the container. The default is
+`examples/lunar_lander_container/output/ppo_lunar_lander_decoupled.zip`. The files belong
+to root.
+
+## Trying it on one machine
+
+To see it work without a second host, this runs the container and the agent on one
+computer (profile A) and stops them when training ends. It needs Docker, and with
+`DEVICE=cpu` it does not need the NVIDIA runtime:
+
+```bash
+DEVICE=cpu ./examples/lunar_lander_container/run_local_demo.sh
+```
+
+It takes the options of [`../lunar_lander/run_demo.sh`](../lunar_lander/README.md#options)
+(`TIMESTEPS`, `N_STEPS` and so on). The model goes to `output/`.
 
 ## What you should see
 
-- The remote container reports `nvidia-smi`, the effective PyTorch device, and
-  SB3/PPO training logs.
-- The local agent runs LunarLander and can render with `--render`.
-- Per-step `lat`, `ato`, and remote `t_wall` values are available in `info`.
+In the container, the `nvidia-smi` table, the PyTorch device and the PPO logs. On the
+local host, `[AGENT] running LunarLander loop` and, when training ends,
+`[AGENT] finish command received`.
 
-## Scope of the example
+## Notes
 
-This is a manual deployment template, not a CI-tested workflow. PPO with
-LunarLander's small MLP benefits little from a GPU; the example demonstrates a
-GPU-capable, cross-host architecture that is more useful for larger policies.
-Remote `t_wall` and local `ATO` are separate clock domains, so synchronize
-hosts with NTP or chrony and measure round-trip time separately for timing
-analysis. The transport uses `pickle`, so connect only trusted endpoints.
+PPO with LunarLander's small network gains little from a GPU. The example is there to
+show a GPU-capable setup across hosts, which pays off with larger policies. The remote
+`t_wall` and the local `t_agent` come from different clocks, so synchronize the hosts
+before comparing them. The transport uses `pickle`, so connect only endpoints you trust.
+These scripts are a starting point to adapt to your infrastructure.
 
 ## References
 
-- Base LunarLander example: [../lunar_lander/README.md](../lunar_lander/README.md)
-- Bare-host deployment: [../lunar_lander_remote/README.md](../lunar_lander_remote/README.md)
-- Main project README: [../../README.md](../../README.md)
+- [LunarLander example](../lunar_lander/README.md)
+- [Bare-host variant](../lunar_lander_remote/README.md)
+- [Main README](../../README.md)

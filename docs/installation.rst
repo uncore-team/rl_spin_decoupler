@@ -4,13 +4,10 @@ Installation
 Requirements
 ------------
 
-- Python 3.8 or newer.
-- No mandatory third-party dependencies for the communication core.
+Python 3.8 or newer. The communication core uses only the standard library.
 
-Install from a local checkout
------------------------------
-
-Clone the repository and install the package in editable mode:
+Install from a checkout
+-----------------------
 
 .. code-block:: bash
 
@@ -18,20 +15,17 @@ Clone the repository and install the package in editable mode:
    cd rl_spin_decoupler
    python -m pip install -e .
 
-Install optional RL dependencies
---------------------------------
+Optional dependencies
+---------------------
 
-The core package does not require Stable-Baselines3 or Gymnasium. Install them
-only if your training scripts depend on them:
+Stable-Baselines3 and Gymnasium are not needed by the library. Install them only if
+your training scripts use them:
 
 .. code-block:: bash
 
    python -m pip install -e ".[rl]"
 
-Install documentation or test dependencies
-------------------------------------------
-
-For contributor workflows:
+To run the tests or build these pages, install the development or documentation extras:
 
 .. code-block:: bash
 
@@ -41,12 +35,9 @@ For contributor workflows:
 Import paths
 ------------
 
-The installed package exposes both of these import styles:
+The package can be imported under two names:
 
 .. code-block:: python
 
-   import spindecoupler
    from spindecoupler import RLSide, AgentSide
-
-   import rl_spin_decoupler
    from rl_spin_decoupler import RLSide, AgentSide

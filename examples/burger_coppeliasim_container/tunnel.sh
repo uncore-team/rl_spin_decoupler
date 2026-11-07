@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-set -e
-# Profile B only: forward a local port to the remote host loopback, where the
-# container publishes the RL server via -p 127.0.0.1:PORT:PORT.
+# Profile B only: forward a local port to the RL container's port on the remote
+# host (published on its loopback). Identical to the bare-host deployment, so this
+# simply runs ../burger_coppeliasim_remote/tunnel.sh.
 #
-# Usage:
-#   ./tunnel.sh user@remote-host [PORT]
-REMOTE="${1:?usage: ./tunnel.sh user@remote-host [port]}"
-PORT="${2:-49054}"
-exec ssh -v -N -L "${PORT}:127.0.0.1:${PORT}" "$REMOTE"
+# Usage:   ./tunnel.sh user@remote-host [REMOTE_PORT] [LOCAL_PORT]
+exec "$(dirname "${BASH_SOURCE[0]}")/../burger_coppeliasim_remote/tunnel.sh" "$@"

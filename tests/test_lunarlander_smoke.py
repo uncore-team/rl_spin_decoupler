@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
+"""End-to-end smoke test of the decoupled LunarLander example (two processes)."""
+
 import subprocess
 import sys
 import time
@@ -40,7 +42,7 @@ def _run_agent_with_retries(
 ) -> subprocess.CompletedProcess:
     """Retry agent launch to absorb RL-server startup jitter in CI."""
 
-    last: subprocess.CompletedProcess | None = None
+    last = None
     for _ in range(attempts):
         result = subprocess.run(
             agent_cmd,
@@ -60,8 +62,8 @@ def _run_agent_with_retries(
     return last
 
 
-def test_lunarlander_example_smoke(free_tcp_port):
-    """Run decoupled LunarLander example with very small timesteps."""
+def test_lunarlander_example_smoke(free_tcp_port, tmp_path):
+    """Run the decoupled LunarLander example for one very short PPO rollout."""
 
     _skip_if_lunarlander_not_available()
 
@@ -72,15 +74,23 @@ def test_lunarlander_example_smoke(free_tcp_port):
     # so RL-side bind address and agent-side connect target are consistent.
     host_ip = BaseCommPoint.get_ip()
 
+    # PPO always completes a whole rollout, so --n-steps is also the number of
+    # steps this run executes.
     rl_cmd = [
         sys.executable,
         str(rl_script),
         "--port",
         str(free_tcp_port),
         "--timesteps",
-        "256",
+        "64",
+        "--n-steps",
+        "64",
         "--timeout",
-        "5.0",
+        "10.0",
+        "--device",
+        "cpu",
+        "--model-path",
+        str(tmp_path / "model.zip"),
         "--debug",
     ]
     agent_cmd = [
@@ -99,24 +109,25 @@ def test_lunarlander_example_smoke(free_tcp_port):
         "--debug",
     ]
 
-    rl_proc = subprocess.Popen(
-        rl_cmd,
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    try:
-        agent = _run_agent_with_retries(agent_cmd=agent_cmd, repo_root=repo_root)
-        rl_out, _ = rl_proc.communicate(timeout=180)
-    finally:
-        _terminate_process(rl_proc)
+    # The RL side logs one line per step with --debug. Send its output to a file:
+    # an undrained pipe (64 KB) would fill up and block the process.
+    rl_log = tmp_path / "rl.log"
+    with rl_log.open("w") as rl_out:
+        rl_proc = subprocess.Popen(
+            rl_cmd, cwd=repo_root, stdout=rl_out, stderr=subprocess.STDOUT, text=True
+        )
+        try:
+            agent = _run_agent_with_retries(agent_cmd=agent_cmd, repo_root=repo_root)
+            rl_proc.wait(timeout=180)
+        finally:
+            _terminate_process(rl_proc)
+    rl_text = rl_log.read_text().lower()
 
     assert agent.returncode == 0, agent.stdout + "\n" + agent.stderr
     assert "finish command received" in agent.stdout.lower()
     assert "sent transition obs action=" in agent.stdout.lower()
-    assert "reward=" in agent.stdout.lower()
 
-    assert "training finished" in rl_out.lower()
-    assert "model saved" in rl_out.lower()
-    assert "rew_agent=" in rl_out.lower()
+    assert "training finished" in rl_text
+    assert "model saved" in rl_text
+    assert " rew=" in rl_text
+    assert (tmp_path / "model.zip").is_file()

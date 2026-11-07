@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 """
-SYSTEM FOR DECOUPLING RL SPIN LOOP FROM AGENT SPIN LOOP.
+Decouple the spin loop of a reinforcement-learning algorithm from the spin loop
+of the agent (a robot or a simulator) that runs in another process.
+
+The RL process uses :class:`RLSide` and the agent process uses :class:`AgentSide`.
+They exchange commands, actions and observations over one TCP connection, and the
+agent also reports two timing values with each step: ``LAT``, how long the
+previous action actually lasted, and ``ATO``, when the observation was sampled.
+Both are measured with the agent's clock.
 
 (c) Juan-Antonio Fernández-Madrigal
 Uncore Team, 2025
@@ -35,53 +42,42 @@ __all__ = [
 ]
 
 
-# -------------------------------------------------------------------------------
-#
-# 	Base Class: RLSide
-#
-# -------------------------------------------------------------------------------
-
-
 class RLSide:
     """
-    Communication endpoint used by the reinforcement-learning process.
+    Endpoint used by the reinforcement-learning process.
 
-    An :class:`RLSide` instance owns the server side of the TCP connection and
-    coordinates one high-level RL loop with one external agent loop. The typical
-    call sequence in an environment wrapper is:
+    It owns the server side of the connection and drives the agent from the
+    environment wrapper:
 
-    1. Construct :class:`RLSide` before training starts.
+    1. Create the object before training starts.
     2. Call :meth:`resetGetObs` from ``reset()``.
     3. Call :meth:`stepSendActGetObs` from each ``step()``.
-    4. Call :meth:`stepExpFinished` once the experiment is over.
+    4. Call :meth:`stepExpFinished` when the experiment is over.
 
-    The class does not define rewards or episode termination on its own. It only
-    transports actions, observations, and timing metadata between processes.
+    It defines no reward and no episode termination; it only moves actions,
+    observations and timing values between the two processes.
     """
 
     def __init__(self, port: int, verbose: bool = False):
         """
-        Create the RL-side communication endpoint and wait for the agent.
+        Open the server socket and wait for the agent to connect.
+
+        The wait lasts up to 60 seconds and cannot be changed.
 
         Args:
-                port: TCP port used by the RL process to listen for the agent
-                        connection. Valid ports are restricted by the underlying
-                        transport layer to the range ``20000`` to ``49151``. The
-                        socket always binds to every interface (``0.0.0.0``), so this
-                        works unmodified whether the process runs on a bare host or
-                        inside a container publishing the port to another host.
-                verbose: If ``True``, print lifecycle messages while waiting for the
-                        agent and while closing the connection.
+            port: TCP port to listen on, between 20000 and 49151. The socket binds
+                to every interface, so this works on a bare host and inside a
+                container that publishes the port.
+            verbose: Print a message when waiting starts and when the agent
+                connects, and when the connection is closed.
 
         Raises:
-                RuntimeError: If no agent connects before the transport timeout or if
-                        the underlying server endpoint cannot be started.
+            RuntimeError: If the agent does not connect in time.
+            OSError: If the port stays in use (see :class:`ServerCommPoint`).
         """
 
         self._verbose = verbose
         self._rlcomm = ServerCommPoint(port)  # not connected yet
-        # if socket in use, repeatedly wait
-        # until free
         if self._verbose:
             print("RL decoupler enabled. Waiting for agent connection...")
         res = self._rlcomm.begin(timeoutaccept=60.0)  # blocks for agent
@@ -91,7 +87,7 @@ class RLSide:
             print("Agent connected to this RL")
 
     def __del__(self):
-        """Best-effort shutdown during garbage collection."""
+        """Close the connection when the object is collected."""
 
         rlcomm = getattr(self, "_rlcomm", None)
         if rlcomm is None:
@@ -104,26 +100,20 @@ class RLSide:
 
     def resetGetObs(self, timeout: float = 10.0):
         """
-        Request the first observation after an episode reset.
+        Ask the agent to reset the episode and wait for the first observation.
 
-        This method is usually called from the RL environment ``reset()`` method.
-        It blocks until the agent acknowledges the reset and sends back the first
-        observation.
+        Call it from the environment's ``reset()``.
 
         Args:
-                timeout: Timeout in seconds for each communication operation involved
-                        in the request. Values less than or equal to ``0.0`` disable the
-                        timeout at the transport layer.
+            timeout: Seconds to wait for the reply. A value of 0 or less waits
+                without limit.
 
         Returns:
-                Tuple[dict, float]: A pair ``(obs, ato)`` where ``obs`` is the first
-                observation dictionary after the reset and ``ato`` is the agent time of
-                observation, that is, the timestamp measured by the agent-side clock
-                when that observation was sampled.
+            A pair ``(obs, ato)``: the first observation after the reset and the
+            agent time at which it was sampled.
 
         Raises:
-                RuntimeError: If the reset command cannot be sent or if the reply is
-                        not received successfully.
+            RuntimeError: If the request cannot be sent or no valid reply arrives.
         """
 
         res = self._rlcomm.sendData(dict({"stepkind": "reset"}))
@@ -140,44 +130,32 @@ class RLSide:
 
     def stepSendActGetObs(self, action, timeout: float = 10.0):
         """
-        Send a new action and wait for the corresponding observation.
+        Send an action and wait for the resulting observation.
 
-        This method is usually called from the RL environment ``step()`` method.
-        It first transfers the new action to the agent and then blocks until the
-        agent reports two pieces of information:
-
-        1. ``LAT``: the actual execution duration of the previous action.
-        2. The observation collected after applying the new action, optionally
-                accompanied by a reward computed on the agent side.
+        Call it from the environment's ``step()``. The agent answers with two
+        messages: first ``LAT``, the duration of the previous action, then the
+        observation that follows the new action.
 
         Args:
-                action: Action object to send to the agent. It must be serializable
-                        by Python ``pickle`` because the transport exchanges pickled
-                        payloads.
-                timeout: Timeout in seconds for each communication operation involved
-                        in the request. Values less than or equal to ``0.0`` disable the
-                        timeout at the transport layer.
+            action: Any picklable object.
+            timeout: Seconds to wait for each of the two replies. A value of 0 or
+                less waits without limit.
 
         Returns:
-                Tuple[float, dict, float, float]: A tuple ``(lat, obs, rew, ato)``.
-                ``lat`` is the duration of the previous action as measured by the
-                agent clock, ``obs`` is the observation dictionary after executing the
-                new action, ``rew`` is the reward reported by the agent for the current
-                action, and ``ato`` is the agent timestamp when the observation was
-                captured.
+            A tuple ``(lat, obs, rew, ato)``: the duration of the previous action,
+            the new observation, the reward the agent attached to it (0.0 unless
+            the agent computes one) and the agent time at which the observation
+            was sampled.
 
-                If your RL code also records a local wall-clock timestamp such as
-                ``t_wall = time.time()``, keep in mind that ``t_wall`` belongs to the
-                RL process clock, while ``lat`` and ``ato`` come from the agent-side
-                clock domain.
+            ``lat`` and ``ato`` come from the agent's clock. A ``time.time()``
+            taken in the RL process belongs to another clock, so the two are not
+            directly comparable.
 
         Raises:
-                RuntimeError: If sending the action fails or if either response
-                        message cannot be received successfully.
+            RuntimeError: If the action cannot be sent or a reply does not arrive.
         """
 
-        # send a STEP indicator to the agent interface, that should use
-        # readWhatToDo() to get the indicator
+        # The agent picks this up with readWhatToDo().
         res = self._rlcomm.sendData(dict({"stepkind": "step", "action": action}))
         if len(res) > 0:
             raise RuntimeError("Error sending step action: " + res)
@@ -194,78 +172,54 @@ class RLSide:
 
     def stepExpFinished(self, timeout: float = 10.0):
         """
-        Notify the agent that the experiment has finished.
+        Tell the agent that the experiment is over.
 
-        Call this method once, after the final RL step, when no more actions will
-        be sent. The method sends a finish indicator to the agent loop so it can
-        perform its own shutdown procedure.
+        Call it once, after the last step. It returns as soon as the message is
+        written. A failure to send it is not reported, because by then the agent
+        may already be gone.
 
         Args:
-                timeout: Reserved for API symmetry with the other high-level methods.
-                        The current implementation sends the finish indicator
-                        immediately and does not consume the timeout value.
-
-        Raises:
-                RuntimeError: Not raised directly by this wrapper, but downstream
-                        socket errors may still surface during shutdown in user-managed
-                        teardown code.
+            timeout: Not used; kept so the three calls have the same signature.
         """
 
         self._rlcomm.sendData(dict({"stepkind": "finish"}))
 
 
-# -------------------------------------------------------------------------------
-#
-# 	Base Class: AgentSide
-#
-# -------------------------------------------------------------------------------
-
-
 class AgentSide:
     """
-    Communication endpoint used by the external agent process.
+    Endpoint used by the agent process.
 
-    An :class:`AgentSide` instance owns the client side of the TCP connection and
-    lets an agent loop poll for new RL commands without blocking when no command
-    is pending. The agent remains responsible for applying actions, resetting its
-    workspace, sampling observations, and optionally computing rewards.
+    It owns the client side of the connection. The agent calls
+    :meth:`readWhatToDo` on every iteration of its own loop; the call returns at
+    once when the RL side has sent nothing, so the loop never stalls waiting for
+    the learner. The agent is responsible for applying actions, resetting its
+    workspace and sampling observations.
     """
 
     class WhatToDo(Enum):
-        """
-        Command kinds that the RL process can send to the agent loop.
+        """Commands the RL side can send to the agent."""
 
-        Attributes:
-                REC_ACTION_SEND_OBS: Receive a new action, report the duration of the
-                        previous action, and later send the observation that results
-                        from the new action.
-                RESET_SEND_OBS: Reset the agent-side episode state and send the first
-                        observation after that reset.
-                FINISH: Stop the experiment and terminate the control loop gracefully.
-        """
-
-        REC_ACTION_SEND_OBS = 0  # receive action from RL, executes it and sends
-        # back resulting observation and other stuff
-        RESET_SEND_OBS = 1  # reset episode and send observation back to RL
-        FINISH = 2  # finish experiment (and comms)
+        REC_ACTION_SEND_OBS = 0  # new action: reply with the previous action's
+        # duration, then with the observation that follows it
+        RESET_SEND_OBS = 1  # reset the episode and reply with the first observation
+        FINISH = 2  # the experiment is over
 
     def __init__(
         self, ipbaselinespart: str, portbaselinespart: int, verbose: bool = False
     ):
         """
-        Create the agent-side communication endpoint and connect to the RL side.
+        Connect to the RL side.
+
+        Start the RL process first: it is the one that listens.
 
         Args:
-                ipbaselinespart: IPv4 address of the RL process that owns the
-                        listening server socket. A common pattern is to pass
-                        ``BaseCommPoint.get_ip()`` when both processes run on
-                        the same host.
-                portbaselinespart: TCP port exposed by the RL process.
-                verbose: If ``True``, print lifecycle messages while connecting and
-                        while closing the connection.
+            ipbaselinespart: IPv4 address of the RL process. When both processes
+                run on the same host, ``BaseCommPoint.get_ip()`` gives a valid one.
+            portbaselinespart: TCP port the RL process listens on.
+            verbose: Print a message when the connection is opened and closed.
 
         Raises:
-                RuntimeError: If the client socket cannot connect to the RL process.
+            RuntimeError: If the connection cannot be established.
         """
 
         self._verbose = verbose
@@ -282,7 +236,7 @@ class AgentSide:
             print("Agent decoupler connected to RL decoupler")
 
     def __del__(self):
-        """Best-effort shutdown during garbage collection."""
+        """Close the connection when the object is collected."""
 
         rlcomm = getattr(self, "_rlcomm", None)
         if rlcomm is None:
@@ -295,40 +249,34 @@ class AgentSide:
 
     def readWhatToDo(self, timeout: float = 10.0):
         """
-        Poll the RL side for the next command.
+        Check whether the RL side has sent a command and read it.
 
-        This method is intended to be called from every agent-loop iteration.
-        The initial poll is non-blocking: if no data are pending in the socket,
-        the method returns ``None`` immediately. Once pending data are detected,
-        reading the command itself may block up to ``timeout`` seconds.
+        It returns ``None`` immediately if nothing is pending. Once something is
+        pending, reading it can block for up to ``timeout`` seconds.
 
         Args:
-                timeout: Maximum number of seconds allowed for reading a pending
-                        command once the socket indicates that data are available.
-                        Values less than or equal to ``0.0`` disable the timeout at
-                        the transport layer.
+            timeout: Seconds to wait for a command that has started to arrive. A
+                value of 0 or less waits without limit.
 
         Returns:
-                Optional[Tuple[AgentSide.WhatToDo, Any]]: ``None`` if no command is
-                pending. Otherwise, a tuple whose first element is a
-                :class:`WhatToDo` value and whose second element is the payload:
+            ``None`` if no command is pending, otherwise a pair
+            ``(what, payload)`` where ``what`` is a :class:`WhatToDo` value:
 
-                - ``(WhatToDo.REC_ACTION_SEND_OBS, action)`` for a normal step.
-                - ``(WhatToDo.RESET_SEND_OBS, None)`` for a reset request.
-                - ``(WhatToDo.FINISH, None)`` for shutdown.
+            - ``(WhatToDo.REC_ACTION_SEND_OBS, action)`` for a step,
+            - ``(WhatToDo.RESET_SEND_OBS, None)`` for a reset,
+            - ``(WhatToDo.FINISH, None)`` for the end of the experiment.
 
         Raises:
-                RuntimeError: If reading the pending command fails.
-                ValueError: If the RL side sends an unknown command indicator.
+            RuntimeError: If the command cannot be read.
+            ValueError: If the command is not one of the three above.
         """
 
         if not self._rlcomm.checkDataToRead():
             return None
 
-        # read last (pending) step()/reset() msg and then proceed accordingly
+        # The message is a dict: {'stepkind': 'reset' | 'step' | 'finish',
+        # 'action': <action>} where 'action' is present only for a step.
         res, ind = self._rlcomm.readData(timeout)
-        # read a dict: { 'stepkind' : 'reset', 'step' or 'finish' ,
-        # 			      'action' : <action> if any}
         if len(res) > 0:
             raise RuntimeError("Error receiving what-to-do from RL: " + res)
 
@@ -343,19 +291,16 @@ class AgentSide:
 
     def stepSendLastActDur(self, lat: float):
         """
-        Send ``LAT``, the duration of the previous action, back to the RL side.
+        Send ``LAT``, the duration of the action that the new one replaces.
 
-        This method should be called immediately after receiving
-        ``WhatToDo.REC_ACTION_SEND_OBS`` and before the new action starts running
-        for its full control interval.
+        Call it right after receiving ``REC_ACTION_SEND_OBS``, before sending the
+        observation.
 
         Args:
-                lat: Actual duration, in seconds, of the action that was being executed
-                        before the newly received action replaced it. This value belongs
-                        to the agent clock domain.
+            lat: Seconds the previous action actually lasted, by the agent's clock.
 
         Raises:
-                RuntimeError: If the timing payload cannot be sent.
+            RuntimeError: If it cannot be sent.
         """
 
         res = self._rlcomm.sendData(dict({"lat": lat}))
@@ -364,22 +309,20 @@ class AgentSide:
 
     def stepSendObs(self, obs, agenttime: float = 0.0, rew: float = 0.0):
         """
-        Send the observation obtained after executing a step action.
+        Send the observation that follows a step action.
 
-        This method completes the response cycle that starts with
-        ``WhatToDo.REC_ACTION_SEND_OBS``. It should be called after the agent has
-        applied the action long enough to produce the next observation.
+        It completes the reply to ``REC_ACTION_SEND_OBS``; call it once the action
+        has been applied for its whole interval.
 
         Args:
-                obs: Observation dictionary produced by the agent or simulator.
-                agenttime: Agent-side timestamp for when ``obs`` was sampled. This is
-                        the value that the RL side receives as ``ATO``.
-                rew: Reward associated with the current action, when reward
-                        computation is delegated to the agent side. If the RL process
-                        owns reward computation, leave this value at its default.
+            obs: The observation. Any picklable object.
+            agenttime: Time at which ``obs`` was sampled, by the agent's clock. The
+                RL side receives it as ``ato``.
+            rew: Reward for the action, if the agent computes it. Leave the
+                default when the RL side does.
 
         Raises:
-                RuntimeError: If the observation payload cannot be sent.
+            RuntimeError: If it cannot be sent.
         """
 
         res = self._rlcomm.sendData(dict({"obs": obs, "rew": rew, "ato": agenttime}))
@@ -388,18 +331,16 @@ class AgentSide:
 
     def resetSendObs(self, obs, agenttime=0.0):
         """
-        Send the first observation collected after a reset.
+        Send the first observation after a reset.
 
-        This method should be called after receiving
-        ``WhatToDo.RESET_SEND_OBS`` and completing the agent-side reset logic.
+        Call it once the agent has finished handling ``RESET_SEND_OBS``.
 
         Args:
-                obs: Observation dictionary collected immediately after the reset.
-                agenttime: Agent-side timestamp for when the reset observation was
-                        sampled. This is the value that the RL side receives as ``ATO``.
+            obs: The observation. Any picklable object.
+            agenttime: Time at which ``obs`` was sampled, by the agent's clock.
 
         Raises:
-                RuntimeError: If the reset observation cannot be sent.
+            RuntimeError: If it cannot be sent.
         """
 
         res = self._rlcomm.sendData({"obs": obs, "ato": agenttime})

@@ -1,17 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""RL-side reward and task-termination logic for the decoupled LunarLander example.
+"""
+Reward and task-level termination for the LunarLander example, computed on the
+RL side.
 
-This module runs on the RL side. It computes reward and the task-level
-termination/truncation conditions using only the observation/action data that
-arrive over the decoupled transport. The agent stays agnostic to the learning
-task; it only transports the observation, timing, and the physics termination
-flags emitted by the Gymnasium environment (crash / out-of-bounds / time limit).
+Only the observation and the action that arrive over the socket are used. The
+agent knows nothing about the task: it sends the observation, its timing and the
+physics flags of Gymnasium (crash, out of bounds, time limit).
 
-Important:
-- This reward is a didactic approximation inspired by LunarLander shaping.
-- It is sufficient to illustrate decoupling; it does not attempt to exactly
-  replicate Gymnasium's internal reward.
+The reward is a rough shaping inspired by LunarLander's, enough to show the
+decoupling; it does not reproduce Gymnasium's own.
 """
 
 from __future__ import annotations
@@ -21,18 +19,15 @@ from typing import Any
 
 import numpy as np
 
-# Defined once for readability and reuse
 ObsType = np.ndarray | list[float] | tuple[float, ...] | dict[str, Any]
 
 
 def _normalize_obs(
     obs: ObsType,
 ) -> np.ndarray:
-    """Normalize accepted observation formats into a 1D float32 array of size 8.
-
-    Accepted forms:
-    - Raw vector-like obs with 8 elements.
-    - Dict payload with key ``observation`` containing that vector.
+    """
+    Return the observation as a float32 vector of 8 values. A dict with an
+    ``observation`` key is accepted too.
     """
 
     if isinstance(obs, dict):
@@ -50,20 +45,14 @@ def compute_reward(
     prev_obs: ObsType | None = None,
     lat: float | None = None,
 ) -> float:
-    """Compute a didactic reward from LunarLander observations.
+    """
+    Reward for the last step.
 
-    Observation convention:
-    [x, y, vx, vy, angle, angular_vel, left_leg_contact, right_leg_contact]
-
-    Reward terms (approximate shaping):
-    - Penalize distance from landing area (x, y -> 0).
-    - Penalize translational velocity (vx, vy).
-    - Penalize tilt and angular velocity.
-    - Bonus for leg contacts.
-    - Optional small fuel-like action penalty.
-
-    The reward can use ``prev_obs`` to build a progress term. ``lat`` is accepted
-    for compatibility with timing-aware experiments but is intentionally optional.
+    The observation is ``[x, y, vx, vy, angle, angular_vel, left_leg, right_leg]``.
+    It is negative in proportion to the distance from the landing area, the speed and
+    the tilt, positive for each leg in contact, and includes a small progress term
+    that compares with ``prev_obs`` and a small cost for firing an engine.
+    ``lat`` is accepted for timing-aware experiments and barely used.
     """
 
     cur = _normalize_obs(obs)
@@ -97,7 +86,7 @@ def compute_reward(
             reward -= 0.01
 
     if lat is not None and lat <= 0.0:
-        # Keep numeric behavior robust if a caller passes degenerate LAT.
+        # Guard against a degenerate LAT from the caller.
         reward -= 0.001
 
     if is_terminated(obs):
@@ -109,14 +98,11 @@ def compute_reward(
 def is_terminated(
     obs: ObsType,
 ) -> bool:
-    """Return the task-level termination decided from observation data.
+    """
+    Landing check, made from the observation.
 
-    Task termination policy used in this example:
-    - Terminate when a stable landing signature is observed: both legs in
-      contact, low speed, and small tilt near ground.
-
-    This is combined on the RL side with the physics termination flag the agent
-    transports (crash / out-of-bounds / Gymnasium time limit).
+    It holds when both legs touch, speed and tilt are low, and the lander is near the
+    pad. The RL side combines it with the physics flag sent by the agent.
     """
 
     arr = _normalize_obs(obs)
@@ -131,8 +117,6 @@ def is_terminated(
 
 
 def is_truncated(step_count: int, max_steps: int) -> bool:
-    """Return whether the episode is truncated by the RL-side step budget."""
-
     if max_steps <= 0:
         raise ValueError("max_steps must be > 0")
     return bool(step_count >= max_steps)

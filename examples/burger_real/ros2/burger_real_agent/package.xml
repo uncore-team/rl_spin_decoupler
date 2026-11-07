@@ -3,7 +3,8 @@
   <name>burger_real_agent</name>
   <version>0.1.0</version>
   <description>ROS2 agent bridge for the real TurtleBot3 Burger RL example.</description>
-  <maintainer email="maintainer@example.com">RL Spin Decoupler</maintainer>
+  <maintainer email="jafernandez@uma.es">Juan-Antonio Fernandez-Madrigal</maintainer>
+  <maintainer email="varevalo@uma.es">Vicente Arévalo-Espejo</maintainer>
   <license>GPL-3.0-only</license>
 
   <buildtool_depend>ament_python</buildtool_depend>

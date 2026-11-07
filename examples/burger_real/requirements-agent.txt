@@ -1,2 +1,4 @@
-# Install these with the ROS2 Humble Python environment.
+# Agent-side dependencies (the Burger host). rclpy and the ROS2 message packages
+# come from ROS2 Humble, not pip: install this in the Python environment that
+# ROS2 uses. Install the repository first: `pip install -e .`
 numpy>=1.24

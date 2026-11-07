@@ -1,4 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
+"""RL side of the CoppeliaSim Burger example: SAC training.
+
+Trains a Stable-Baselines3 SAC policy to drive the TurtleBot3 Burger to a goal
+among obstacles. The simulator lives in another process (the agent side,
+``agent_side_burger_coppeliasim.py``); this process talks to it through the
+``spindecoupler`` TCP socket, which makes the environment look like an ordinary
+Gymnasium one.
+
+Who decides what:
+
+* reward and the task-level termination are computed HERE, in ``reward.py``:
+  ``compute_reward``, ``is_goal_reached`` (goal) and ``is_truncated`` (step
+  budget);
+* the agent reports the PHYSICS termination in the payload (``terminated`` =
+  collision, detected from its LiDAR).
+
+An episode ends when either side says so. Start this process first: it waits up
+to 60 s for the agent to connect. The trained model is saved at the end.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,29 +28,28 @@ from typing import Any
 
 import gymnasium as gym
 import numpy as np
+from episode_config import (
+    COLLISION_LIDAR_THRESHOLD,
+    LIDAR_MAX_RANGE,
+    MAX_ANGULAR_VELOCITY,
+    MAX_GOAL_DISTANCE,
+    MAX_LINEAR_VELOCITY,
+    NUM_LIDAR_SECTORS,
+)
 from gymnasium import spaces
-from stable_baselines3 import PPO
-
-from episode_config import LIDAR_MAX_RANGE, NUM_LIDAR_SECTORS, OBS_DIM
 from reward import compute_reward, is_goal_reached, is_truncated
+from stable_baselines3 import SAC
+
 from spindecoupler import RLSide
 
-# ============================================================================
-# Reward and task-level termination are computed HERE, on the RL side:
-#   - reward           -> reward.py::compute_reward
-#   - goal reached     -> reward.py::is_goal_reached (task termination)
-#   - step-budget      -> reward.py::is_truncated (RL-side truncation)
-# The agent transports the PHYSICS termination in the observation payload:
-#   - collision        -> payload["terminated"] (see _parse_payload)
-# The RL side ORs the physics flag with its task/budget decisions.
-# ============================================================================
 
-
-# ============================================================================
-# DECOUPLED GYMNASIUM ENVIRONMENT
-# ============================================================================
 class DecoupledCoppeliaBurgerEnv(gym.Env):
-    """Gymnasium environment backed by rl_spin_decoupler communications for CoppeliaSim."""
+    """Gymnasium environment backed by the decoupler socket (see module docstring).
+
+    Observation (10 floats): ``[distance_to_goal, relative_goal_angle, ray_1, ...,
+    ray_8]``; the rays are 45-degree LiDAR sector minima in meters.
+    Action (2 floats): ``[linear_x (m/s), angular_z (rad/s)]``.
+    """
 
     metadata = {"render_modes": []}
 
@@ -50,22 +69,26 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         self._step_count = 0
         self._prev_obs: np.ndarray | None = None
 
-        # Observation (OBS_DIM): NUM_LIDAR_SECTORS LiDAR + distance + angle.
-        # LiDAR entries are metric distances clamped to LIDAR_MAX_RANGE (must
-        # match scene/laser.py::config["max_scan_distance"]).
+        # The lower bound of the rays is the collision threshold: a smaller
+        # reading ends the episode.
         self.observation_space = spaces.Box(
-            low=np.array([0.0] * NUM_LIDAR_SECTORS + [0.0, -np.pi], dtype=np.float32),
+            low=np.array(
+                [0.0, -np.pi] + [COLLISION_LIDAR_THRESHOLD] * NUM_LIDAR_SECTORS,
+                dtype=np.float32,
+            ),
             high=np.array(
-                [LIDAR_MAX_RANGE] * NUM_LIDAR_SECTORS + [10.0, np.pi],
+                [MAX_GOAL_DISTANCE, np.pi] + [LIDAR_MAX_RANGE] * NUM_LIDAR_SECTORS,
                 dtype=np.float32,
             ),
             dtype=np.float32,
         )
 
-        # Continuous action (2 dim): [linear velocity (m/s), angular velocity (rad/s)]
+        # Forward velocity only (no reversing); turning in both directions.
         self.action_space = spaces.Box(
-            low=np.array([-0.22, -2.84], dtype=np.float32),
-            high=np.array([0.22, 2.84], dtype=np.float32),
+            low=np.array([0.0, -MAX_ANGULAR_VELOCITY], dtype=np.float32),
+            high=np.array(
+                [MAX_LINEAR_VELOCITY, MAX_ANGULAR_VELOCITY], dtype=np.float32
+            ),
             dtype=np.float32,
         )
 
@@ -100,7 +123,7 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         return obs, info
 
     def step(self, action: np.ndarray):
-        action_list = action.tolist()  # Send the continuous action vector.
+        action_list = action.tolist()
         # The transported reward slot is unused: reward is computed here.
         lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
             action_list, timeout=self._timeout
@@ -110,12 +133,10 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         reward = compute_reward(obs, action, self._prev_obs, float(lat))
 
         self._step_count += 1
-        # terminated = physics collision (from agent) OR task goal (from obs).
+        # terminated: collision reported by the agent, or goal reached.
         terminated = bool(term_phys or is_goal_reached(obs))
-        # truncated = physics truncation (from agent) OR RL-side step budget.
-        truncated = bool(
-            trunc_phys or is_truncated(self._step_count, self._max_steps)
-        )
+        # truncated: reported by the agent, or step budget spent.
+        truncated = bool(trunc_phys or is_truncated(self._step_count, self._max_steps))
         self._prev_obs = obs.copy()
 
         t_wall = time.time()
@@ -148,17 +169,32 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="PPO RL-side CoppeliaSim Burger Demo")
-    parser.add_argument("--port", type=int, default=49054, help="TCP port for RL-side server")
-    parser.add_argument("--timesteps", type=int, default=100_000, help="Total SB3 timesteps")
+    parser = argparse.ArgumentParser(description="SAC RL-side CoppeliaSim Burger Demo")
+    parser.add_argument(
+        "--port", type=int, default=49054, help="TCP port to listen on for the agent"
+    )
+    parser.add_argument(
+        "--timesteps", type=int, default=100_000, help="Total SB3 timesteps"
+    )
     parser.add_argument(
         "--max-steps",
         type=int,
         default=500,
         help="Maximum RL steps per episode before truncation (RL-side budget)",
     )
-    parser.add_argument("--timeout", type=float, default=5.0, help="Communication timeout")
-    parser.add_argument("--model-path", type=str, default="ppo_coppelia_burger.zip", help="Output model path")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Seconds to wait for each agent reply. A reset is the slowest one "
+        "(the scene is rebuilt); raise it if the simulator can be slow.",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default="sac_coppelia_burger.zip",
+        help="Where to save the trained model (.zip)",
+    )
     parser.add_argument("--seed", type=int, default=7, help="Random seed")
     parser.add_argument(
         "--device",
@@ -180,7 +216,7 @@ def main() -> None:
     )
     try:
         env.reset(seed=args.seed)
-        model = PPO(
+        model = SAC(
             "MlpPolicy",
             env,
             verbose=1,

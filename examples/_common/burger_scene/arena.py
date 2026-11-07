@@ -8,9 +8,9 @@ query through `getExternalWallParams()` instead of reading this object's
 custom data directly.
 """
 
-import common
-
 from typing import Any, Dict, List, Optional
+
+import common
 
 sim = None
 self_handle = None
@@ -18,8 +18,18 @@ self_handle = None
 _SCHEMA: Dict[str, Any] = {
     "scene_x_dim": {"default": 1.2, "minimum": 0.5, "maximum": 100.0, "type": "float"},
     "scene_y_dim": {"default": 2.4, "minimum": 0.5, "maximum": 100.0, "type": "float"},
-    "scene_walls_thickness": {"default": 0.05, "minimum": 0.05, "maximum": 1.0, "type": "float"},
-    "scene_walls_height": {"default": 0.25, "minimum": 0.01, "maximum": 5.0, "type": "float"},
+    "scene_walls_thickness": {
+        "default": 0.05,
+        "minimum": 0.05,
+        "maximum": 1.0,
+        "type": "float",
+    },
+    "scene_walls_height": {
+        "default": 0.25,
+        "minimum": 0.01,
+        "maximum": 5.0,
+        "type": "float",
+    },
     "color": {"default": [1.0, 1.0, 1.0], "type": "color"},
 }
 
@@ -33,9 +43,6 @@ def _with_defaults(user_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return common.merge_config(_defaults(), stored, user_cfg, _SCHEMA)
 
 
-# ----------------------------------------------------------------------------
-# Geometry
-# ----------------------------------------------------------------------------
 def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     cfg = _with_defaults(config)
 
@@ -47,7 +54,12 @@ def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
 
     common.remove_child_shapes(sim, self_handle)
 
-    x, y, t, h = cfg["scene_x_dim"], cfg["scene_y_dim"], cfg["scene_walls_thickness"], cfg["scene_walls_height"]
+    x, y, t, h = (
+        cfg["scene_x_dim"],
+        cfg["scene_y_dim"],
+        cfg["scene_walls_thickness"],
+        cfg["scene_walls_height"],
+    )
     col = cfg["color"]
     walls: List[int] = []
 
@@ -81,7 +93,9 @@ def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     sim.setObjectParent(grp, self_handle, True)
     sim.setObjectAlias(grp, "WallsGroup")
 
-    prop = (sim.getObjectProperty(grp) | sim.objectproperty_ignoreviewfitting) & (~sim.objectproperty_selectable)
+    prop = (sim.getObjectProperty(grp) | sim.objectproperty_ignoreviewfitting) & (
+        ~sim.objectproperty_selectable
+    )
     sim.setObjectProperty(grp, prop)
     sim.setObjectSpecialProperty(
         grp,
@@ -93,20 +107,16 @@ def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     sim.setObjectInt32Param(grp, sim.shapeintparam_static, 1)
 
 
-# ----------------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------------
 def getExternalWallParams() -> Dict[str, Any]:
     """Read-only getter: current wall config. Never rebuilds the geometry."""
     return common.read_config(sim, self_handle, _defaults())
 
 
 def setExternalWallParams(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Update wall config and rebuild the geometry -- but only if `params` is given.
+    """Update the wall config and rebuild the walls, only if `params` is given.
 
-    Calling this with no arguments used to still trigger a full wall
-    teardown/rebuild, which made it unusable as a safe read-only getter (see
-    getExternalWallParams above for that use case instead).
+    Called without arguments it just returns the current config, so a bare
+    call is harmless. Use getExternalWallParams to read it explicitly.
     """
     cur = _with_defaults(params)
     common.write_config(sim, self_handle, cur)
@@ -115,9 +125,6 @@ def setExternalWallParams(params: Optional[Dict[str, Any]] = None) -> Dict[str, 
     return cur
 
 
-# ----------------------------------------------------------------------------
-# CoppeliaSim lifecycle
-# ----------------------------------------------------------------------------
 def init(simulation: Any) -> None:
     global sim, self_handle
 

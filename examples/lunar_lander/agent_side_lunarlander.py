@@ -1,24 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Agent-side demo wrapping Gymnasium LunarLander-v3.
+"""
+Agent side of the LunarLander example: the simulation.
 
-Run this process after rl_side_lunarlander.py is listening. The agent executes a
-faster control loop and exchanges commands/observations with the RL process
-through rl_spin_decoupler.
+Runs Gymnasium's LunarLander-v3 and serves the RL side (rl_side_lunarlander.py,
+which has to be listening already). A fast loop steps the physics with the
+current action, and commands from the RL side are polled without blocking.
 
-Responsibilities of this process:
-- It computes NO reward: reward and task-level termination live on the RL side.
-- It DOES detect physics termination that only the environment can know
-  (Gymnasium ``terminated``: crash / out-of-bounds; ``truncated``: time limit)
-  and transports those flags in the payload. The RL side combines them with the
-  task-level landing check and its own step budget.
-- On a physics done, the agent freezes stepping and waits for the RL-driven
-  reset (a single reset), instead of auto-resetting locally.
+The agent computes no reward. It reports what only the environment knows,
+Gymnasium's ``terminated`` (crash, out of bounds) and ``truncated`` (time limit),
+with each observation; the RL side adds the landing check and its own step
+budget. When the physics ends an episode the agent freezes and waits for the RL
+side to reset it, instead of resetting by itself.
 """
 
 from __future__ import annotations
 
 import argparse
+import signal
 import time
 from enum import Enum
 
@@ -29,7 +28,7 @@ from spindecoupler import AgentSide, BaseCommPoint
 
 
 class StepState(Enum):
-    """State machine for handling decoupler commands inside the spin loop."""
+    """Phases of the loop that serves the RL side."""
 
     READY_FOR_RL_COMMAND = 0
     EXECUTING_LAST_ACTION = 1
@@ -37,7 +36,7 @@ class StepState(Enum):
 
 
 class LunarLanderAgent:
-    """High-rate agent process around Gymnasium LunarLander-v3."""
+    """Runs LunarLander-v3 and answers the commands of the RL side."""
 
     def __init__(
         self,
@@ -82,30 +81,20 @@ class LunarLanderAgent:
         self._reset_workspace()
 
     def _build_observation(self) -> np.ndarray:
-        """Return the latest LunarLander observation (8-dim vector)."""
-
         return self._obs
 
     def _null_action(self) -> int:
-        """Return a neutral valid action for discrete LunarLander."""
-
         return 0
 
     def _apply_action(self, action: int) -> None:
-        """Store the action to be applied on each future control tick.
-
-        The spin loop maps one control tick to one ``env.step(action)`` call
-        (1:1 mapping). The current action is held constant until a new RL action
-        arrives.
-        """
+        """Keep ``action`` until the RL side sends another one."""
 
         self._last_action = int(action)
 
     def _reset_workspace(self) -> None:
-        """Reset internal environment state and cache the first observation."""
+        """Reset the environment and keep its first observation."""
 
-        obs, info = self._env.reset(seed=self._episode_seed)
-        _ = info
+        obs, _info = self._env.reset(seed=self._episode_seed)
         self._episode_seed += 1
         self._obs = np.asarray(obs, dtype=np.float32)
         self._term_latched = False
@@ -116,7 +105,7 @@ class LunarLanderAgent:
     def _build_transport_payload(
         self, terminated: bool = False, truncated: bool = False
     ) -> dict[str, object]:
-        """Wrap the observation with the physics termination flags."""
+        """Observation plus the physics flags, as the RL side expects it."""
 
         return {
             "observation": self._build_observation().tolist(),
@@ -125,22 +114,20 @@ class LunarLanderAgent:
         }
 
     def _run_control_tick(self) -> None:
-        """Advance one simulator tick with the latest action.
+        """
+        Step the physics once with the current action.
 
-        Gymnasium's own reward is discarded (the RL side computes the learning
-        signal). Gymnasium's ``terminated``/``truncated`` are the physics done
-        this process is authoritative for: they are latched and, once raised,
-        the episode is frozen until the RL-driven reset arrives.
+        Gymnasium's own reward is dropped because the RL side computes it. The
+        ``terminated`` and ``truncated`` flags are latched, and once one is raised the
+        episode stays frozen until the reset arrives.
         """
 
         if self._frozen:
             return
 
-        obs, reward, terminated, truncated, info = self._env.step(
+        obs, _reward, terminated, truncated, _info = self._env.step(
             int(self._last_action)
         )
-        _ = reward
-        _ = info
         self._obs = np.asarray(obs, dtype=np.float32)
         self._try_render_frame()
         if terminated or truncated:
@@ -149,8 +136,6 @@ class LunarLanderAgent:
             self._frozen = True
 
     def _try_render_frame(self) -> None:
-        """Render a frame when enabled, disabling on runtime display errors."""
-
         if not self._render_enabled or not self._render_available:
             return
         try:
@@ -160,7 +145,7 @@ class LunarLanderAgent:
             print(f"[AGENT] render disabled at runtime: {exc}")
 
     def spinloop(self) -> None:
-        """Run the agent loop until FINISH is received."""
+        """Serve the RL side until it sends FINISH."""
 
         print("[AGENT] running LunarLander loop")
         try:
@@ -170,8 +155,7 @@ class LunarLanderAgent:
 
                 if self._state == StepState.EXECUTING_LAST_ACTION:
                     if now - self._last_action_start >= self._rl_step_period:
-                        # No reward here. Report the physics flags; stay frozen
-                        # until the RL side drives the reset (single reset).
+                        # A finished episode stays frozen until the RL side resets it.
                         self._comm.stepSendObs(
                             self._build_transport_payload(
                                 terminated=self._term_latched,
@@ -222,8 +206,6 @@ class LunarLanderAgent:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments for the agent-side process."""
-
     parser = argparse.ArgumentParser(
         description="Agent-side LunarLander wrapper for rl_spin_decoupler"
     )
@@ -247,7 +229,7 @@ def parse_args() -> argparse.Namespace:
         "--timeout",
         type=float,
         default=1.0,
-        help="Timeout for readWhatToDo() once data are pending",
+        help="Seconds to wait for a pending RL command before stepping again",
     )
     parser.add_argument("--seed", type=int, default=7, help="Initial environment seed")
     parser.add_argument(
@@ -261,24 +243,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    """Entry point for the executable agent-side demo."""
+def _raise_keyboard_interrupt(*_) -> None:
+    raise KeyboardInterrupt
 
+
+def main() -> None:
     args = parse_args()
-    agent = LunarLanderAgent(
-        ip=args.ip,
-        port=args.port,
-        rl_step_period=args.rl_step_period,
-        control_period=args.control_period,
-        timeout=args.timeout,
-        seed=args.seed,
-        render=args.render,
-        debug=args.debug,
-    )
+    # Let `kill` (SIGTERM) stop the agent cleanly, like Ctrl+C does.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     try:
+        agent = LunarLanderAgent(
+            ip=args.ip,
+            port=args.port,
+            rl_step_period=args.rl_step_period,
+            control_period=args.control_period,
+            timeout=args.timeout,
+            seed=args.seed,
+            render=args.render,
+            debug=args.debug,
+        )
         agent.spinloop()
     except KeyboardInterrupt:
-        print("[AGENT] interrupted by user")
+        print("[AGENT] interrupted")
 
 
 if __name__ == "__main__":

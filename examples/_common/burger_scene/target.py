@@ -5,11 +5,16 @@ Builds/rebuilds the flat disk that marks the goal position, exposes its
 config via `setTargetParams()`, and exposes `reset_pose(x, y)` so
 orchestrator.py can relocate it every episode without reaching into this
 object's internals (no more `sim.setObjectPosition` calls from outside).
+
+This script is ROS2-agnostic: the goal is published as `/goal_pose` by the
+external ROS2 bridge (examples/burger_real_sim), which reads the target's
+world position through orchestrator.get_ros_state(). The scene only owns the
+marker geometry and placement.
 """
 
-import common
-
 from typing import Any, Dict, Optional
+
+import common
 
 sim = None
 self_handle = None
@@ -19,7 +24,12 @@ self_handle = None
 GROUND_CLEARANCE = 0.05
 
 _SCHEMA: Dict[str, Any] = {
-    "outer_disk_rad": {"default": 0.05, "minimum": 0.005, "maximum": 1.0, "type": "float"},
+    "outer_disk_rad": {
+        "default": 0.05,
+        "minimum": 0.005,
+        "maximum": 1.0,
+        "type": "float",
+    },
     "height": {"default": 0.001, "minimum": 0.0001, "maximum": 0.01, "type": "float"},
 }
 
@@ -33,9 +43,6 @@ def _with_defaults(user_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return common.merge_config(_defaults(), stored, user_cfg, _SCHEMA)
 
 
-# ----------------------------------------------------------------------------
-# Geometry
-# ----------------------------------------------------------------------------
 def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     cfg = _with_defaults(config)
     common.remove_child_shapes(sim, self_handle)
@@ -44,21 +51,24 @@ def rebuild(config: Optional[Dict[str, Any]] = None) -> None:
     if rad <= 0:
         return
 
-    disk = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [rad * 2.0, rad * 2.0, h], 0)
+    disk = sim.createPrimitiveShape(
+        sim.primitiveshape_cylinder, [rad * 2.0, rad * 2.0, h], 0
+    )
     sim.setObjectAlias(disk, "Outer_disk")
     sim.setObjectParent(disk, self_handle, False)
     sim.setObjectPosition(disk, self_handle, [0.0, 0.0, h / 2.0])
-    sim.setObjectInt32Param(disk, sim.shapeintparam_respondable, 0)  # non-collidable, passive
+    sim.setObjectInt32Param(
+        disk, sim.shapeintparam_respondable, 0
+    )  # non-collidable, passive
     sim.setObjectInt32Param(disk, sim.shapeintparam_static, 1)
     sim.setObjectColor(disk, 0, sim.colorcomponent_ambient_diffuse, [0.0, 0.0, 1.0])
 
-    prop = (sim.getObjectProperty(disk) | sim.objectproperty_ignoreviewfitting) & (~sim.objectproperty_selectable)
+    prop = (sim.getObjectProperty(disk) | sim.objectproperty_ignoreviewfitting) & (
+        ~sim.objectproperty_selectable
+    )
     sim.setObjectProperty(disk, prop)
 
 
-# ----------------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------------
 def setTargetParams(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     cur = _with_defaults(params)
     if params:
@@ -73,12 +83,11 @@ def reset_pose(x: float, y: float) -> None:
     Called by orchestrator.py, which decides *where* the target spawns; this
     function only knows *how* to place the marker (fixed ground clearance).
     """
-    sim.setObjectPosition(self_handle, sim.handle_world, [float(x), float(y), GROUND_CLEARANCE])
+    sim.setObjectPosition(
+        self_handle, sim.handle_world, [float(x), float(y), GROUND_CLEARANCE]
+    )
 
 
-# ----------------------------------------------------------------------------
-# CoppeliaSim lifecycle
-# ----------------------------------------------------------------------------
 def init(simulation: Any) -> None:
     global sim, self_handle
 

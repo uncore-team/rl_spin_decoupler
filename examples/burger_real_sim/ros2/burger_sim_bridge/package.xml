@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>burger_sim_bridge</name>
+  <version>0.1.0</version>
+  <description>CoppeliaSim-to-ROS2 bridge that exposes the simulated TurtleBot3 Burger with the same topic contract as the real robot.</description>
+  <maintainer email="jafernandez@uma.es">Juan-Antonio Fernandez-Madrigal</maintainer>
+  <maintainer email="varevalo@uma.es">Vicente Arévalo-Espejo</maintainer>
+  <license>GPL-3.0-only</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

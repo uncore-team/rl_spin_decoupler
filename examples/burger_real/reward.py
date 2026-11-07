@@ -31,9 +31,9 @@ def compute_reward(
     lat: float | None = None,
 ) -> float:
     current = _normalize_obs(obs)
-    lidar_min = float(np.min(current[:NUM_LIDAR_SECTORS]))
-    distance = float(current[NUM_LIDAR_SECTORS])
-    angle = float(current[NUM_LIDAR_SECTORS + 1])
+    lidar_min = float(np.min(current[2 : 2 + NUM_LIDAR_SECTORS]))
+    distance = float(current[0])
+    angle = float(current[1])
 
     if lidar_min <= COLLISION_LIDAR_THRESHOLD:
         return -100.0
@@ -53,7 +53,7 @@ def compute_reward(
 
 def is_goal_reached(obs: ObsType) -> bool:
     current = _normalize_obs(obs)
-    return bool(current[NUM_LIDAR_SECTORS] <= GOAL_DIST_THRESHOLD)
+    return bool(current[0] <= GOAL_DIST_THRESHOLD)
 
 
 def is_truncated(step_count: int, max_steps: int) -> bool:

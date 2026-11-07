@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-set -e
-# Build a RL-side image with GPU.
+# Build the RL-side image. Run it from anywhere; the build context is the
+# repository root. Extra arguments go to `docker build`, e.g. --no-cache.
 #
-# Usage:
-#   ./build_image.sh
-#
-# Extra args are forwarded to docker, e.g.:
-#   ./build_image.sh --no-cache
+# Usage:   ./build_image.sh [docker build options]
+# Environment variables: IMAGE (image name, default lunarlander-rl)
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."   # repository root
 
-# Build context is the REPO ROOT so the image can COPY spindecoupler + example.
-# Run this script from the repository root.
-docker build "$@" -f examples/lunar_lander_container/Dockerfile -t lunarlander-rl .
+exec docker build "$@" -f examples/lunar_lander_container/Dockerfile \
+  -t "${IMAGE:-lunarlander-rl}" .

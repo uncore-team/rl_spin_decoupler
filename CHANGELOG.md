@@ -2,6 +2,17 @@
 
 All notable changes to this repository are documented in this file.
 
+## [Unreleased]
+### Changed
+- Both ends of the socket now set `TCP_NODELAY`. A protocol step is a short request followed by two short replies sent back to back, and with Nagle's algorithm on the second reply waited for the delayed ACK of the first (up to 40 ms on Linux). On loopback the exchange went from 44 ms to 0.14 ms, and the `LAT` reported by the agent no longer includes that wait.
+- Docstrings and comments of `spindecoupler.py` and `socketcomms/comms.py` rewritten; the code is otherwise unchanged.
+- `skeleton_rl_side.py` and `skeleton_agent_side.py` are now consistent with each other and with the quick start in `README.md`.
+- READMEs of the library and of every example follow the same structure and style (see `CONTRIBUTING.md`).
+
+### Added
+- Examples for the CoppeliaSim Burger (SAC training, split variants, and the real-robot agent run against a simulated robot), with scripts that start the whole stack.
+- `.dockerignore` for the container builds.
+
 ## [1.2.1] - 2026-07-28
 ### Added
 - New end-to-end examples under `examples/`, including the LunarLander example and its runnable RL-side and agent-side scripts.

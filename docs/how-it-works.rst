@@ -1,64 +1,58 @@
 How It Works
 ============
 
-Decoupling pattern
-------------------
+The pattern
+-----------
 
-The package implements a simple but useful pattern: the learning loop and the
-agent loop live in separate processes and synchronize through a TCP connection.
+The learner and the agent run as separate processes and talk through one TCP
+connection. This helps when the agent must run a real-time or nearly real-time control
+loop, when the RL library expects a synchronous ``reset()`` and ``step()``, and when the
+two cannot share a thread or a notion of time.
 
-This is helpful when:
+Commands
+--------
 
-- the agent must run a real-time or near-real-time control loop,
-- the RL library expects a synchronous ``reset()/step()`` API,
-- and the two loops cannot safely share a single thread or a single timing
-  model.
+The RL side sends one of three commands:
 
-Command protocol
-----------------
+``reset``
+   The agent resets its episode and answers with the first observation.
 
-The RL side sends one of three command kinds:
+``step``
+   The agent receives a new action, answers with ``LAT`` (the duration of the previous
+   action) and then with the observation that follows the new action, plus a reward if it
+   computes one.
 
-- ``reset``: reset the agent-side episode and return the first observation.
-- ``step``: apply a new action, return ``LAT`` for the previous action, then
-  return the new observation and optional reward.
-- ``finish``: stop the experiment cleanly.
+``finish``
+   The agent leaves its loop.
 
-Clock domains
--------------
+Clocks
+------
 
-The design intentionally preserves two time domains.
+Two clocks are kept apart on purpose. The agent's clock gives ``LAT`` and ``ATO`` (the
+time at which the observation was sampled). The RL process can add ``t_wall``, read with
+``time.time()`` when the answer arrives. The values are related but not
+interchangeable: ``ATO`` and ``t_wall`` differ by the network delay, the serialization
+time, any queueing, and the offset between the two hosts' clocks when they are not
+synchronized.
 
-Agent clock
-~~~~~~~~~~~
+Polling
+-------
 
-The agent loop owns:
+The agent calls :meth:`spindecoupler.AgentSide.readWhatToDo` on every iteration of its
+loop. The method first checks whether the socket has data; if not it returns ``None`` at
+once, so the loop keeps running while the learner thinks.
 
-- ``LAT``: duration of the previous action,
-- ``ATO``: timestamp of observation acquisition.
+Transport
+---------
 
-RL clock
-~~~~~~~~
+Payloads are pickled and sent over TCP, each preceded by its length in 4 bytes. TCP is
+a byte stream, so a single ``send`` on one side does not correspond to a single ``recv``
+on the other, and the length tells the receiver where a message ends.
 
-The RL loop can add:
+Both ends set ``TCP_NODELAY``. A step is a short request followed by two short replies
+(``LAT`` and the observation). With Nagle's algorithm on, the second reply waits for the
+acknowledgement of the first, and the receiver delays that acknowledgement by up to
+40 ms on Linux. On loopback the exchange took 44 ms without the option and 0.14 ms with
+it.
 
-- ``t_wall``: local wall-clock time when the RL process receives a response.
-
-These values are related but not interchangeable. In particular, ``ATO`` and
-``t_wall`` may differ because of network latency, serialization overhead, queue
-delays, or the fact that the processes run on different hosts.
-
-Non-blocking polling
---------------------
-
-The agent loop is allowed to keep running even when no RL command is pending.
-The method :meth:`spindecoupler.AgentSide.readWhatToDo` first checks whether the
-socket has data available; if not, it returns ``None`` immediately.
-
-Transport model
----------------
-
-Payloads are serialized with Python ``pickle`` and sent over TCP with explicit
-message framing. This framing is important because TCP is a byte stream: a
-single ``send`` on one side is not guaranteed to match a single ``recv`` on the
-other side without an application-level frame boundary.
+Unpickling data can run arbitrary code, so the two processes must trust each other.
