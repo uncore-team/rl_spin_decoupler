@@ -18,6 +18,7 @@ All notable changes to this repository are documented in this file.
 - READMEs of the library and of every example follow the same structure and style (see `CONTRIBUTING.md`).
 
 ### Added
+- Query channel: `RLSideQuery` (server) and `AgentSideQuery` (client) let the agent ask, on demand, for the action that a trained policy would take for an observation. Based on the `add_query_channel` branch, adapted to the transport options, the logger and the style of the rest of the library; `receive_query()` returns the observation, not the raw message.
 - `spindecoupler_gym.DecoupledEnv`, a reusable Gymnasium environment on top of `RLSide`. The LunarLander example uses it.
 - `benchmarks/` with `bench_transport.py` (step cost with and without `TCP_NODELAY`) and `bench_decoupling.py` (control loop regularity, coupled against decoupled), their results, and a test that runs them.
 - Documentation pages for the benchmarks and the related work, `CITATION.cff`, `SECURITY.md`, and a workflow that builds the distributions and publishes them to PyPI when a release is published.

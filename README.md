@@ -107,6 +107,14 @@ everything:
 In the LunarLander and Burger examples the agent only transports observations and
 timing, while reward and the task-level end of the episode are computed on the RL side.
 
+## Query channel
+
+Once a policy is trained, `RLSideQuery` and `AgentSideQuery` let the agent ask the RL
+process, on demand, for the action that the policy would take for an observation,
+without advancing any episode. The agent calls `query_action(obs)` and the RL side
+answers each `receive_query()` with `send_action(action)`. It uses its own port. See
+[How it works](docs/how-it-works.rst).
+
 ## Gymnasium environment
 
 Each example wraps `RLSide` in a Gymnasium environment. `spindecoupler_gym.DecoupledEnv`

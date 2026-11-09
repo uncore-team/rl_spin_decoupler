@@ -56,7 +56,10 @@ al., 2026). The released package extends that work in the following ways.
     without `TCP_NODELAY`, and the regularity of the agent's control loop against the
     time the learner needs, coupled and decoupled.
 
-11. Transport hardening. Frames carry a header with a magic number and a protocol
+11. Query channel. `RLSideQuery` and `AgentSideQuery` let the agent request the action of
+    a trained policy for an observation, with reconnection, for deployment.
+
+12. Transport hardening. Frames carry a header with a magic number and a protocol
     version, so a foreign peer or a mismatched release fails with a clear message. The
     frame size is bounded (`max_frame_size`), incoming pickles are restricted to an
     allowlist unless `allow_pickle=True`, a stuck peer cannot block a send forever
