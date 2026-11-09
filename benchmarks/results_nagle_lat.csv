@@ -1,0 +1,3 @@
+tcp_nodelay,median_lat_ms,p95_lat_ms,max_lat_ms
+False,350.6,350.8,3287.4
+True,350.6,350.7,350.9

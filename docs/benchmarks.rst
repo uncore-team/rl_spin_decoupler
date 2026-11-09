@@ -1,7 +1,7 @@
 Benchmarks
 ==========
 
-Two scripts in ``benchmarks/`` reproduce the timing claims. They use only the standard
+Three scripts in ``benchmarks/`` reproduce the timing claims. They use only the standard
 library (the Stable-Baselines3 baseline runs only if it is installed) and run over the
 loopback interface. The numbers below were measured on Linux
 6.18 (WSL2) with Python 3.10; absolute values depend on the machine, the shape does not.
@@ -39,5 +39,15 @@ learner time. The decoupled loop keeps its
 period whatever the learner does. The benchmark measures the control loop, not learning
 performance, so it does not depend on the algorithm.
 
-To reproduce them, run ``python benchmarks/bench_transport.py`` and
-``python benchmarks/bench_decoupling.py`` from the repository root.
+TCP_NODELAY and the LAT of a held action
+---------------------------------------
+
+The cost of Nagle's algorithm above appears when the two replies of a step leave back to
+back. When the agent holds each action for an RL step before reporting, as in the
+TurtleBot3 example, each side has at most one message in flight. With a 300 ms hold and a
+50 ms agent loop, the median LAT is 350.6 ms with and without ``TCP_NODELAY``: the delayed
+acknowledgement does not enter the step.
+
+To reproduce them, run ``python benchmarks/bench_transport.py``,
+``python benchmarks/bench_decoupling.py`` and ``python benchmarks/bench_nagle_lat.py``
+from the repository root.

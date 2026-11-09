@@ -1,6 +1,6 @@
 # Benchmarks
 
-Two scripts that reproduce the timing claims of the library. They use only the
+Three scripts that reproduce the timing claims of the library. They use only the
 standard library (the plot of the second one needs Matplotlib, and its
 Stable-Baselines3 baseline runs only if that package is installed) and run on one machine
 over the loopback interface, so they take about a minute. Absolute numbers depend on
@@ -12,6 +12,7 @@ From the repository root:
 python benchmarks/bench_transport.py --csv benchmarks/results_transport.csv
 python benchmarks/bench_decoupling.py --steps 20 --csv benchmarks/results_decoupling.csv \
     --plot benchmarks/decoupling.png
+python benchmarks/bench_nagle_lat.py --csv benchmarks/results_nagle_lat.csv
 ```
 
 ## Cost of a step (`bench_transport.py`)
@@ -63,3 +64,23 @@ plots the same data.
 
 The benchmark measures the control loop, not learning performance. The learner here
 only sleeps, so the result is the same for any algorithm.
+
+## `TCP_NODELAY` and the LAT of a held action (`bench_nagle_lat.py`)
+
+`bench_transport.py` sends the two replies of a step back to back, which is where Nagle's
+algorithm costs a delayed ACK. In the TurtleBot3 example the agent instead holds each
+action for an RL step before it reports, so each side has at most one message in
+flight. The script reproduces that loop (300 ms hold, 50 ms agent loop, LAT reported as
+the skeleton agent does) and compares the LAT with `TCP_NODELAY` off and on, over 40 RL
+steps per row (`results_nagle_lat.csv`).
+
+| `TCP_NODELAY` | median LAT | p95 | max |
+|---|---|---|---|
+| off | 350.6 ms | 350.8 ms | 3287.4 ms |
+| on | 350.6 ms | 350.7 ms | 350.9 ms |
+
+The median and p95 do not depend on the option: in this loop the delayed ACK does not
+enter the step. The LAT is 350 ms rather than 300 ms because the agent notices the end
+of the hold on its next 50 ms tick. The single maximum of about 3 s is a stall of the
+host (WSL2): repeated runs show it once in a while with either setting.
+
