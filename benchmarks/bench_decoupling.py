@@ -10,6 +10,10 @@ it reports an observation and receives the next action; the learner needs
   not run the control loop meanwhile, as a synchronous Gym environment would.
 - decoupled: the agent polls ``readWhatToDo`` once per control tick, which returns
   at once when nothing has arrived, and keeps the loop running.
+- sb3_subproc (only if Stable-Baselines3 is installed): the same control loop
+  inside a Gymnasium environment run by SB3's ``SubprocVecEnv``. The environment
+  lives in its own process, but it only runs inside ``step()``, so the loop stops
+  while the learner computes, as in the coupled case.
 
 For each learner time it reports the gaps between consecutive control ticks.
 
@@ -18,6 +22,7 @@ Usage: python benchmarks/bench_decoupling.py [--steps 30] [--csv out.csv]
 """
 
 import argparse
+import multiprocessing
 import sys
 import threading
 import time
@@ -92,6 +97,58 @@ def measure(think, coupled, steps):
     return [(b - a) * 1000 for a, b in zip(ticks, ticks[1:])]
 
 
+def measure_sb3_subproc(think, steps):
+    """Gaps in milliseconds of the same loop inside an SB3 ``SubprocVecEnv``."""
+    import gymnasium as gym
+    import numpy as np
+    from stable_baselines3.common.vec_env import SubprocVecEnv
+
+    class ControlLoopEnv(gym.Env):
+        """Runs the control ticks of one RL step inside ``step()``."""
+
+        observation_space = gym.spaces.Box(-1.0, 1.0, shape=(1,), dtype=np.float32)
+        action_space = gym.spaces.Discrete(2)
+
+        def __init__(self):
+            self.ticks = []
+
+        def reset(self, seed=None, options=None):
+            super().reset(seed=seed)
+            return np.zeros(1, dtype=np.float32), {}
+
+        def step(self, action):
+            start = time.perf_counter()
+            while time.perf_counter() - start < RL_STEP_PERIOD:
+                self.ticks.append(time.perf_counter())
+                time.sleep(CONTROL_PERIOD)
+            return np.zeros(1, dtype=np.float32), 0.0, False, False, {}
+
+        def get_ticks(self):
+            return self.ticks
+
+    # fork, where available, reuses the modules already imported (torch takes long
+    # to import again); the environment still runs only inside step().
+    start = "fork" if "fork" in multiprocessing.get_all_start_methods() else None
+    vec = SubprocVecEnv([ControlLoopEnv], start_method=start)
+    try:
+        vec.reset()
+        for _ in range(steps):
+            time.sleep(think)  # stands for the policy and the update
+            vec.step(np.zeros(1, dtype=np.int64))
+        ticks = vec.env_method("get_ticks")[0]
+    finally:
+        vec.close()
+    return [(b - a) * 1000 for a, b in zip(ticks, ticks[1:])]
+
+
+def sb3_available():
+    try:
+        import stable_baselines3  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def summarize(gaps):
     ordered = sorted(gaps)
     missed = sum(1 for g in gaps if g > 1.5 * CONTROL_PERIOD * 1000)
@@ -115,18 +172,19 @@ def main():
     header = "mode,think_ms,median_gap_ms,p99_gap_ms,max_gap_ms,missed_ticks"
     print(header)
     rows = []
-    for coupled in (True, False):
+    modes = ["coupled", "decoupled"]
+    if sb3_available():
+        modes.append("sb3_subproc")
+    else:
+        print("# Stable-Baselines3 not installed: sb3_subproc skipped")
+    for mode in modes:
         for think in THINK_TIMES:
-            gaps = measure(think, coupled, args.steps)
+            if mode == "sb3_subproc":
+                gaps = measure_sb3_subproc(think, args.steps)
+            else:
+                gaps = measure(think, mode == "coupled", args.steps)
             median, p99, worst, missed = summarize(gaps)
-            row = (
-                "coupled" if coupled else "decoupled",
-                think * 1000,
-                median,
-                p99,
-                worst,
-                missed,
-            )
+            row = (mode, think * 1000, median, p99, worst, missed)
             rows.append(row)
             print("{},{:.0f},{:.1f},{:.1f},{:.1f},{}".format(*row))
     if args.csv:
@@ -145,8 +203,14 @@ def plot(rows, path):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(5.5, 3.4))
-    for mode, style in (("coupled", "o-"), ("decoupled", "s--")):
+    for mode, style in (
+        ("coupled", "o-"),
+        ("decoupled", "s--"),
+        ("sb3_subproc", "^:"),
+    ):
         data = [r for r in rows if r[0] == mode]
+        if not data:
+            continue
         ax.plot([r[1] for r in data], [r[4] for r in data], style, label=mode)
     ax.axhline(CONTROL_PERIOD * 1000, color="gray", linewidth=0.8, linestyle=":")
     ax.set_xlabel("learner time per decision (ms)")

@@ -36,4 +36,5 @@ def test_decoupling_benchmark_reports_both_modes(tmp_path):
 
     assert result.returncode == 0, result.stderr
     modes = {line.split(",")[0] for line in out.read_text().splitlines()[1:]}
-    assert modes == {"coupled", "decoupled"}
+    # sb3_subproc is added only when Stable-Baselines3 is installed.
+    assert {"coupled", "decoupled"} <= modes <= {"coupled", "decoupled", "sb3_subproc"}

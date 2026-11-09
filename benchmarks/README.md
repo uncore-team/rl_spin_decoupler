@@ -1,7 +1,8 @@
 # Benchmarks
 
 Two scripts that reproduce the timing claims of the library. They use only the
-standard library (the plot of the second one needs Matplotlib) and run on one machine
+standard library (the plot of the second one needs Matplotlib, and its
+Stable-Baselines3 baseline runs only if that package is installed) and run on one machine
 over the loopback interface, so they take about a minute. Absolute numbers depend on
 the machine and the operating system; the shape of the results does not.
 
@@ -9,7 +10,7 @@ From the repository root:
 
 ```bash
 python benchmarks/bench_transport.py --csv benchmarks/results_transport.csv
-python benchmarks/bench_decoupling.py --csv benchmarks/results_decoupling.csv \
+python benchmarks/bench_decoupling.py --steps 20 --csv benchmarks/results_decoupling.csv \
     --plot benchmarks/decoupling.png
 ```
 
@@ -32,26 +33,31 @@ that wait. See `socketcomms/README.md`.
 
 An agent runs a control loop with a period of 20 ms. Every 100 ms it reports an
 observation and receives the next action, which the learner needs a given time to
-produce. Both agents use the library:
+produce. Three agents are compared:
 
 - Coupled: after reporting, the agent waits for the action and does not run its loop,
   as a synchronous Gym environment does.
 - Decoupled: the agent calls `readWhatToDo()` on every tick. It returns at once when
   nothing has arrived, so the loop keeps its period and the action in force is held.
+- SB3 `SubprocVecEnv` (only if Stable-Baselines3 is installed): the same loop inside a
+  Gymnasium environment run by Stable-Baselines3 in its own process. The environment
+  runs only inside `step()`, so moving it to another process does not keep the loop
+  running while the learner computes.
 
 The table gives the longest gap between two consecutive control ticks and the number of
 ticks later than 1.5 periods, over 20 RL steps per row (`results_decoupling.csv`).
 
-| Learner time per decision | Coupled: longest gap (late ticks) | Decoupled: longest gap (late ticks) |
-|---|---|---|
-| 0 ms | 20.9 ms (0) | 20.2 ms (0) |
-| 20 ms | 40.9 ms (19) | 20.3 ms (0) |
-| 50 ms | 70.8 ms (19) | 20.8 ms (0) |
-| 100 ms | 120.9 ms (19) | 20.3 ms (0) |
-| 200 ms | 221.1 ms (19) | 20.3 ms (0) |
+| Learner time per decision | Coupled | Decoupled | SB3 `SubprocVecEnv` |
+|---|---|---|---|
+| 0 ms | 21.0 ms (0) | 20.3 ms (0) | 20.6 ms (0) |
+| 20 ms | 40.9 ms (19) | 20.4 ms (0) | 40.7 ms (19) |
+| 50 ms | 70.8 ms (19) | 20.2 ms (0) | 70.5 ms (19) |
+| 100 ms | 121.2 ms (19) | 20.2 ms (0) | 120.6 ms (19) |
+| 200 ms | 220.9 ms (19) | 20.2 ms (0) | 220.7 ms (19) |
 
-The gap of the coupled agent grows with the learner time, because the loop stops while
-it waits. The decoupled loop keeps its 20 ms period whatever the learner does, which is
+Each cell is the longest gap, with the late ticks in brackets. The gap of the coupled
+agent, and of the same loop under `SubprocVecEnv`, grows with the learner time, because
+the loop stops while it waits. The decoupled loop keeps its 20 ms period whatever the learner does, which is
 what a real robot or a simulator that advances in real time needs. `decoupling.png`
 plots the same data.
 
