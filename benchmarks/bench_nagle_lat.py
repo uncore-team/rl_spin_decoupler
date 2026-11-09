@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import environment, free_port, percentile  # noqa: E402
+from _common import connect_agent, environment, free_port, percentile  # noqa: E402
 
 from spindecoupler import AgentSide, BaseCommPoint, RLSide  # noqa: E402
 
@@ -65,14 +65,14 @@ def measure(nodelay, steps):
         port = free_port()
         server = {}
         accepting = threading.Thread(
-            target=lambda: server.setdefault("rl", RLSide(port, accept_timeout=20.0))
+            target=lambda: server.setdefault("rl", RLSide(port, accept_timeout=20.0)),
+            daemon=True,
         )
         accepting.start()
-        time.sleep(0.2)
-        agent = AgentSide("127.0.0.1", port)
-        accepting.join()
+        agent = connect_agent(port)
+        accepting.join(timeout=30.0)
         rl = server["rl"]
-        worker = threading.Thread(target=run_agent, args=(agent,))
+        worker = threading.Thread(target=run_agent, args=(agent,), daemon=True)
         worker.start()
         rl.resetGetObs(timeout=10.0)
         lats = []

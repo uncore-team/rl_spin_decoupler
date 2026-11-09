@@ -31,7 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import environment, free_port, percentile  # noqa: E402
+from _common import connect_agent, environment, free_port, percentile  # noqa: E402
 
 from spindecoupler import AgentSide, RLSide  # noqa: E402
 
@@ -40,10 +40,9 @@ RL_STEP_PERIOD = 0.1  # s, how long each action stays applied before the next re
 THINK_TIMES = (0.0, 0.02, 0.05, 0.1, 0.2)  # s, time the learner needs per decision
 
 
-def run_learner(port, steps, think, ready):
+def run_learner(port, steps, think):
     """RL side: ``steps`` decisions, each taking ``think`` seconds."""
     rl = RLSide(port, accept_timeout=20.0)
-    ready.set()
     rl.resetGetObs(timeout=10.0)
     for _ in range(steps):
         time.sleep(think)  # stands for the policy and the update
@@ -53,7 +52,7 @@ def run_learner(port, steps, think, ready):
 
 def run_agent(port, coupled):
     """Agent side. Return the timestamps of its control ticks after the reset."""
-    agent = AgentSide("127.0.0.1", port)
+    agent = connect_agent(port)
     ticks = []
     started = False
     last_report = time.perf_counter()
@@ -87,13 +86,14 @@ def run_agent(port, coupled):
 def measure(think, coupled, steps):
     """Return the gaps in milliseconds between consecutive control ticks."""
     port = free_port()
-    ready = threading.Event()
-    learner = threading.Thread(target=run_learner, args=(port, steps, think, ready))
+    # daemon: if the agent fails, a learner still waiting must not keep the
+    # process alive.
+    learner = threading.Thread(
+        target=run_learner, args=(port, steps, think), daemon=True
+    )
     learner.start()
-    ready.wait(5.0)
-    time.sleep(0.2)
     ticks = run_agent(port, coupled)
-    learner.join()
+    learner.join(timeout=30.0)
     return [(b - a) * 1000 for a, b in zip(ticks, ticks[1:])]
 
 
