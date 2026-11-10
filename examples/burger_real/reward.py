@@ -43,7 +43,7 @@ def compute_reward(
     reward = 0.0
     if prev_obs is not None:
         previous = _normalize_obs(prev_obs)
-        reward += float(previous[NUM_LIDAR_SECTORS] - distance) * 50.0
+        reward += float(previous[0] - distance) * 50.0
 
     reward -= 0.05 * abs(angle)
     reward -= 0.01 * float(np.linalg.norm(np.asarray(action, dtype=np.float32)))

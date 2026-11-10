@@ -52,3 +52,12 @@ def test_invalid_observation_and_budget_are_rejected():
         reward.compute_reward([0.0], [0.0, 0.0])
     with pytest.raises(ValueError, match="max_steps"):
         reward.is_truncated(1, 0)
+
+
+def test_progress_is_measured_on_the_goal_distance():
+    # 0.2 m closer to the goal: 0.2 * 50 minus the 0.1 step penalty. The rays (1.0)
+    # must not enter the progress term.
+    value = reward.compute_reward(
+        observation(distance=0.6), [0.0, 0.0], observation(distance=0.8)
+    )
+    assert value == pytest.approx(9.9)
