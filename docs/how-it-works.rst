@@ -42,29 +42,6 @@ The agent calls :meth:`spindecoupler.AgentSide.readWhatToDo` on every iteration 
 loop. The method first checks whether the socket has data; if not it returns ``None`` at
 once, so the loop keeps running while the learner thinks.
 
-Query channel
--------------
-
-The ``reset()``/``step()`` cycle is driven by the RL side. The package also offers an
-optional channel driven by the agent, meant for deployment once a policy is trained:
-the agent asks for the action that the policy would take for an observation, and no
-episode advances.
-
-- :class:`spindecoupler.RLSideQuery` is the server. :meth:`~spindecoupler.RLSideQuery.receive_query`
-  waits for a query and returns the observation, and
-  :meth:`~spindecoupler.RLSideQuery.send_action` answers it. If the agent goes away,
-  :meth:`~spindecoupler.RLSideQuery.reconnect` waits for a new one on the same port.
-- :class:`spindecoupler.AgentSideQuery` is the client. Each call to
-  :meth:`~spindecoupler.AgentSideQuery.query_action` sends one observation and blocks
-  until the action arrives.
-
-The format of observations and actions is not fixed, so a query can carry a batch (a
-list of lists, or a NumPy array) as long as both sides agree. The channel has its own
-TCP connection, so it needs its own port next to an :class:`~spindecoupler.RLSide`, and
-it takes the same transport options (``max_frame_size``, ``allow_pickle``,
-``send_timeout``). With the default ``allow_pickle=False`` the observations and
-actions must be plain data or NumPy arrays.
-
 Transport
 ---------
 
