@@ -12,7 +12,7 @@ from rl_spin_decoupler.socketcomms.comms import (
 )
 
 import spindecoupler as spindecoupler_module
-from spindecoupler import AgentSide, BaseCommPoint, RLSide
+from spindecoupler import AgentSide, BaseCommPoint, ConnectionLost, RLSide
 
 
 class FakeSocket:
@@ -98,8 +98,13 @@ class FakeSocketFactory:
 
 
 class FakeComm:
-    def __init__(self, *, check=True, read_results=None, send_results=None):
+    def __init__(
+        self, *, check=True, read_results=None, send_results=None, connected=True
+    ):
         self.check = check
+        self.connected = connected
+        self.begin_results = []
+        self.begin_calls = []
         self.read_results = list(read_results or [])
         self.send_results = list(send_results or [])
         self.sent = []
@@ -117,6 +122,13 @@ class FakeComm:
         if self.send_results:
             return self.send_results.pop(0)
         return ""
+
+    def is_connected(self):
+        return self.connected
+
+    def begin(self, timeoutaccept=None):
+        self.begin_calls.append(timeoutaccept)
+        return self.begin_results.pop(0) if self.begin_results else ""
 
     def end(self):
         return ""
@@ -147,6 +159,7 @@ def make_agent_side(fake_comm):
 def make_rl_side(fake_comm):
     rl = object.__new__(RLSide)
     rl._verbose = False
+    rl._accept_timeout = 60.0
     rl._rlcomm = fake_comm
     return rl
 
@@ -634,7 +647,7 @@ def test_agentside_read_what_to_do_wraps_comm_errors():
     fake_comm = FakeComm(check=True, read_results=[("broken", None)])
     agent = make_agent_side(fake_comm)
 
-    with pytest.raises(RuntimeError, match="Error receiving what-to-do"):
+    with pytest.raises(ConnectionLost, match="Error receiving what-to-do"):
         agent.readWhatToDo(timeout=0.25)
 
 
@@ -650,11 +663,11 @@ def test_agentside_send_helpers_wrap_errors():
     fake_comm = FakeComm(send_results=["lat failed", "obs failed", "reset failed"])
     agent = make_agent_side(fake_comm)
 
-    with pytest.raises(RuntimeError, match="lat to RL"):
+    with pytest.raises(ConnectionLost, match="lat to RL"):
         agent.stepSendLastActDur(0.5)
-    with pytest.raises(RuntimeError, match="observation/reward to RL"):
+    with pytest.raises(ConnectionLost, match="observation/reward to RL"):
         agent.stepSendObs({"obs": 1}, agenttime=1.0, rew=2.0)
-    with pytest.raises(RuntimeError, match="observation to RL"):
+    with pytest.raises(ConnectionLost, match="observation to RL"):
         agent.resetSendObs({"obs": 2}, agenttime=3.0)
 
 
@@ -698,23 +711,23 @@ def test_rlside_reset_get_obs_and_step_send_act_get_obs():
 
 def test_rlside_methods_wrap_communication_errors():
     rl = make_rl_side(FakeComm(send_results=["send reset failed"]))
-    with pytest.raises(RuntimeError, match="sending what to do"):
+    with pytest.raises(ConnectionLost, match="sending what to do"):
         rl.resetGetObs()
 
     rl = make_rl_side(FakeComm(read_results=[("read reset failed", None)]))
-    with pytest.raises(RuntimeError, match="after-reset observation"):
+    with pytest.raises(ConnectionLost, match="after-reset observation"):
         rl.resetGetObs()
 
     rl = make_rl_side(FakeComm(send_results=["send step failed"]))
-    with pytest.raises(RuntimeError, match="sending step action"):
+    with pytest.raises(ConnectionLost, match="sending step action"):
         rl.stepSendActGetObs(action=1)
 
     rl = make_rl_side(FakeComm(read_results=[("lat failed", None)]))
-    with pytest.raises(RuntimeError, match="last action duration"):
+    with pytest.raises(ConnectionLost, match="last action duration"):
         rl.stepSendActGetObs(action=1)
 
     rl = make_rl_side(FakeComm(read_results=[("", {"lat": 0.1}), ("obs failed", None)]))
-    with pytest.raises(RuntimeError, match="step observation"):
+    with pytest.raises(ConnectionLost, match="step observation"):
         rl.stepSendActGetObs(action=1)
 
 
@@ -770,3 +783,98 @@ def test_agentside_destructor_verbose_path(capsys):
     AgentSide.__del__(agent)
 
     assert "Connection with RL finished." in capsys.readouterr().out
+
+
+def test_connection_lost_is_a_runtime_error():
+    assert issubclass(ConnectionLost, RuntimeError)
+
+
+def test_protocol_calls_raise_connection_lost_when_not_connected():
+    rl = make_rl_side(FakeComm(connected=False))
+    agent = make_agent_side(FakeComm(connected=False))
+    calls = [
+        rl.resetGetObs,
+        lambda: rl.stepSendActGetObs(action=1),
+        agent.readWhatToDo,
+        lambda: agent.stepSendLastActDur(0.1),
+        lambda: agent.stepSendObs({"obs": 1}),
+        lambda: agent.resetSendObs({"obs": 1}),
+    ]
+    for call in calls:
+        with pytest.raises(ConnectionLost, match="call reconnect"):
+            call()
+
+
+def test_rlside_reconnect_waits_with_the_given_or_stored_timeout(capsys):
+    comm = FakeComm()
+    rl = make_rl_side(comm)
+    rl._verbose = True
+
+    rl.reconnect()
+    rl.reconnect(timeout=3.5)
+
+    assert comm.begin_calls == [60.0, 3.5]
+    out = capsys.readouterr().out
+    assert "Waiting for the agent to reconnect" in out
+    assert "Agent reconnected to this RL" in out
+
+
+def test_rlside_reconnect_validates_timeout_and_reports_failure():
+    comm = FakeComm()
+    rl = make_rl_side(comm)
+
+    with pytest.raises(ValueError, match="timeout must be > 0.0"):
+        rl.reconnect(timeout=0.0)
+
+    comm.begin_results = ["timeout"]
+    with pytest.raises(RuntimeError, match="No agent reconnection: timeout"):
+        rl.reconnect(timeout=0.1)
+
+
+def test_agentside_reconnect_succeeds_at_the_first_attempt(capsys):
+    comm = FakeComm()
+    agent = make_agent_side(comm)
+    agent._verbose = True
+
+    agent.reconnect()
+
+    assert len(comm.begin_calls) == 1
+    out = capsys.readouterr().out
+    assert "Reconnecting to the RL side" in out
+    assert "reconnected to RL decoupler" in out
+
+
+def test_agentside_reconnect_retries_until_it_connects(monkeypatch):
+    comm = FakeComm()
+    comm.begin_results = ["refused", "refused", ""]
+    agent = make_agent_side(comm)
+    sleeps = []
+    monkeypatch.setattr(spindecoupler_module.time, "sleep", sleeps.append)
+
+    agent.reconnect(timeout=60.0, retry_interval=0.25)
+
+    assert len(comm.begin_calls) == 3
+    assert sleeps == [0.25, 0.25]
+
+
+def test_agentside_reconnect_gives_up_after_the_timeout(monkeypatch):
+    comm = FakeComm()
+    comm.begin_results = ["refused"] * 10
+    agent = make_agent_side(comm)
+    clock = iter([0.0, 0.4, 0.8])  # deadline, after attempt 1, after attempt 2
+    monkeypatch.setattr(spindecoupler_module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(spindecoupler_module.time, "sleep", lambda _s: None)
+
+    with pytest.raises(RuntimeError, match="Could not reconnect to RL within 1.0 s"):
+        agent.reconnect(timeout=1.0, retry_interval=0.5)
+
+    assert len(comm.begin_calls) == 2
+
+
+def test_agentside_reconnect_validates_arguments():
+    agent = make_agent_side(FakeComm())
+
+    with pytest.raises(ValueError, match="timeout must be > 0.0"):
+        agent.reconnect(timeout=0.0)
+    with pytest.raises(ValueError, match="retry_interval must be > 0.0"):
+        agent.reconnect(retry_interval=0.0)

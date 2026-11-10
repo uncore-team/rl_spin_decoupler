@@ -20,6 +20,9 @@ class RLEnv:
     def __init__(self, debug: bool = False):
         self._debug = debug
         self._commstoagent = RLSide(49054, verbose=debug)  # waits for the agent
+        # To survive a lost connection, catch ConnectionLost, call
+        # self._commstoagent.reconnect() and then resetGetObs(); or build the
+        # environment on spindecoupler_gym.DecoupledEnv(..., reconnect=True).
 
     def resetGetObs(self):
         obs0, t_agent = self._commstoagent.resetGetObs()

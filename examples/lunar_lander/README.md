@@ -82,6 +82,11 @@ stays frozen) and waits for the next command. One limit is fixed in the library:
 side waits 60 seconds for the agent after it starts listening, which is why the agent is
 started right away.
 
+If the agent restarts or the network drops, the connection is lost. The environment is
+built with `reconnect=True`: the episode in progress is truncated, the RL side waits up to
+60 seconds for the agent, and the agent stops its lander (null action) and reconnects.
+Training then goes on with a new episode.
+
 ## What you should see
 
 PPO logs from Stable-Baselines3 in the RL process, then

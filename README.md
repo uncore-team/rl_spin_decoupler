@@ -114,7 +114,17 @@ is that wrapper (it needs `pip install gymnasium`; the core module does not). A 
 subclasses it and overrides `compute_reward()`, and optionally `parse_payload()`,
 `is_terminated()` and `is_truncated()`. `step()` returns the timing values of the
 protocol in `info`. The [LunarLander example](examples/lunar_lander/rl_side_lunarlander.py)
-is a complete use.
+is a complete use. With `reconnect=True` the environment survives a lost connection (see
+below).
+
+## Connection loss
+
+If the connection drops, the protocol calls raise `ConnectionLost` (a `RuntimeError`).
+The agent stops acting and calls `AgentSide.reconnect()`, and the RL side calls
+`RLSide.reconnect()` and resets. The episode in progress is truncated, since the agent
+kept acting during the outage. `DecoupledEnv(reconnect=True)` does it for you, and TCP
+keepalive detects a silent network drop in about 8 s. See
+[How It Works](docs/how-it-works.rst).
 
 ## Benchmarks
 

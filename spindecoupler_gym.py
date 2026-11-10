@@ -21,7 +21,7 @@ from typing import Any
 
 import gymnasium as gym
 
-from spindecoupler import RLSide, enable_console_logging
+from spindecoupler import ConnectionLost, RLSide, enable_console_logging
 
 logger = logging.getLogger("spindecoupler")
 
@@ -52,6 +52,16 @@ class DecoupledEnv(gym.Env):
             limit on the RL side.
         debug: Log one line per reset and step (the ``spindecoupler`` logger at
             debug level, shown on the standard output).
+        reconnect: Survive a lost connection. If it drops during ``step()``, that
+            step is returned truncated (previous observation, zero reward,
+            ``info["connection_lost"]`` true and ``lat`` and ``t_agent`` NaN), the
+            connection is restored with :meth:`~spindecoupler.RLSide.reconnect`, and
+            the next ``reset()`` starts a new episode. A drop during ``reset()`` is
+            retried once. With ``False`` (the default),
+            :class:`~spindecoupler.ConnectionLost` propagates.
+
+    Attributes:
+        connection_losses: How many lost connections were recovered.
     """
 
     metadata = {"render_modes": []}
@@ -64,6 +74,7 @@ class DecoupledEnv(gym.Env):
         timeout: float = 10.0,
         max_steps: int | None = None,
         debug: bool = False,
+        reconnect: bool = False,
     ):
         super().__init__()
         if debug:
@@ -76,6 +87,14 @@ class DecoupledEnv(gym.Env):
         self._step_count = 0
         self._prev_obs: Any = None
         self._finished = False
+        self._reconnect = reconnect
+        self.connection_losses = 0
+
+    def _recover(self, exc: ConnectionLost):
+        """Count a lost connection and wait for the agent to come back."""
+        self.connection_losses += 1
+        logger.warning("connection lost (%s); reconnecting", exc)
+        self._rl.reconnect()
 
     def parse_payload(self, payload: Any) -> tuple[Any, bool, bool]:
         """
@@ -103,7 +122,13 @@ class DecoupledEnv(gym.Env):
     ) -> tuple[Any, dict[str, Any]]:
         """Ask the agent to reset and return its first observation and ``info``."""
         super().reset(seed=seed)
-        payload, ato = self._rl.resetGetObs(timeout=self._timeout)
+        try:
+            payload, ato = self._rl.resetGetObs(timeout=self._timeout)
+        except ConnectionLost as exc:
+            if not self._reconnect:
+                raise
+            self._recover(exc)
+            payload, ato = self._rl.resetGetObs(timeout=self._timeout)
         obs, _terminated, _truncated = self.parse_payload(payload)
         self._step_count = 0
         self._prev_obs = obs
@@ -113,9 +138,25 @@ class DecoupledEnv(gym.Env):
     def step(self, action: Any):
         """Send ``action`` to the agent and return the Gymnasium 5-tuple."""
         # The reward slot of the protocol is not used: it is computed here.
-        lat, payload, _rew, ato = self._rl.stepSendActGetObs(
-            action, timeout=self._timeout
-        )
+        try:
+            lat, payload, _rew, ato = self._rl.stepSendActGetObs(
+                action, timeout=self._timeout
+            )
+        except ConnectionLost as exc:
+            if not self._reconnect:
+                raise
+            self._recover(exc)
+            self._step_count += 1
+            info = {
+                "lat": float("nan"),
+                "t_agent": float("nan"),
+                "t_wall": time.time(),
+                "step_count": self._step_count,
+                "terminated_physics": False,
+                "truncated_physics": False,
+                "connection_lost": True,
+            }
+            return self._prev_obs, 0.0, False, True, info
         obs, term_physics, trunc_physics = self.parse_payload(payload)
         reward = self.compute_reward(obs, action, self._prev_obs, float(lat))
         self._step_count += 1
@@ -131,6 +172,7 @@ class DecoupledEnv(gym.Env):
             "step_count": self._step_count,
             "terminated_physics": bool(term_physics),
             "truncated_physics": bool(trunc_physics),
+            "connection_lost": False,
         }
         logger.debug(
             "step lat=%.6f ato=%.6f rew=%.6f terminated=%s truncated=%s",

@@ -43,6 +43,7 @@ class DecoupledLunarLanderEnv(DecoupledEnv):
         timeout: float = 10.0,
         max_steps: int = 1000,
         debug: bool = False,
+        reconnect: bool = True,
     ):
         super().__init__(
             RLSide(port, verbose=debug),
@@ -54,6 +55,7 @@ class DecoupledLunarLanderEnv(DecoupledEnv):
             timeout=timeout,
             max_steps=max_steps,
             debug=debug,
+            reconnect=reconnect,
         )
 
     def parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:

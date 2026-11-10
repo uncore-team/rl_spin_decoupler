@@ -41,6 +41,13 @@ PROTOCOL_VERSION = 1
 # to buffer up to 4 GiB.
 DEFAULT_MAX_FRAME_SIZE = 64 * 1024 * 1024
 
+# TCP keepalive: seconds without traffic before the first probe, seconds between
+# probes, and unanswered probes before the connection is given up. A silent network
+# drop is then detected in about 8 s.
+KEEPALIVE_IDLE = 5
+KEEPALIVE_INTERVAL = 1
+KEEPALIVE_COUNT = 3
+
 _MAGIC = b"SD"
 _HEADER = struct.Struct("!2sBI")  # magic, protocol version, payload length
 
@@ -238,6 +245,44 @@ class BaseCommPoint:
         the option from the listening socket.
         """
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+    @staticmethod
+    def _enable_keepalive(sock: socket.socket):
+        """
+        Make the operating system probe an idle connection (set TCP keepalive).
+
+        A network that drops silently (a robot's WiFi, an unplugged cable) produces
+        neither a FIN nor an RST, so a side that only reads when data is pending
+        would never notice. With these values the loss is detected in about 8 s.
+        The probes are answered by the kernel of the other end, so a long pause of
+        the learner does not trigger them.
+
+        Only the keepalive flag is mandatory. The tuning options differ between
+        platforms, so each one is set if it exists and ignored if it is refused.
+        """
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        idle = getattr(socket, "TCP_KEEPIDLE", None)
+        if idle is None:
+            idle = getattr(socket, "TCP_KEEPALIVE", None)  # macOS
+        tuning = (
+            (idle, KEEPALIVE_IDLE),
+            (getattr(socket, "TCP_KEEPINTVL", None), KEEPALIVE_INTERVAL),
+            (getattr(socket, "TCP_KEEPCNT", None), KEEPALIVE_COUNT),
+        )
+        for option, value in tuning:
+            if option is None:
+                continue
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+            except OSError:
+                pass
+
+    def is_connected(self) -> bool:
+        """
+        True while a connection is open: after ``begin()`` and before ``end()`` or a
+        failure that closed it.
+        """
+        return self._begun
 
     def __copy__(self):
         """A point owns a socket, so it cannot be copied."""
@@ -485,6 +530,7 @@ class ServerCommPoint(BaseCommPoint):
         try:
             self._sock, _ = self._basesock.accept()
             self._disable_nagle(self._sock)
+            self._enable_keepalive(self._sock)
             self._begun = True
             self._basesock.settimeout(None)
             return ""
@@ -558,6 +604,7 @@ class ClientCommPoint(BaseCommPoint):
         try:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._disable_nagle(self._sock)
+            self._enable_keepalive(self._sock)
             # connect() returns once the OS has queued the connection, even if the
             # server has not called accept() yet.
             self._sock.connect((self._ipv4, self._port))

@@ -16,6 +16,8 @@ High-level API
    :members:
    :show-inheritance:
 
+.. autoexception:: ConnectionLost
+
 Gymnasium environment
 ---------------------
 

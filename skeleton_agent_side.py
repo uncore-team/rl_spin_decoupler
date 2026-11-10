@@ -12,7 +12,7 @@ import time
 from enum import Enum
 from typing import Any
 
-from spindecoupler import AgentSide, BaseCommPoint
+from spindecoupler import AgentSide, BaseCommPoint, ConnectionLost
 
 
 class Agent:
@@ -74,7 +74,14 @@ class Agent:
 
     def spinloop(self) -> None:
         while True:
-            self.step()
+            try:
+                self.step()
+            except ConnectionLost:
+                # Holding the last action while disconnected is not safe.
+                self._lastaction = self._null_action()
+                self._apply_action(self._lastaction)
+                self._commstoRL.reconnect()
+                self._stepstate = Agent.StepState.READYFORRLCOMMAND
             time.sleep(self._control_timestep)
 
     def _build_observation(self):

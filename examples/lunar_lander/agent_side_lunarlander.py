@@ -24,7 +24,7 @@ from enum import Enum
 import gymnasium as gym
 import numpy as np
 
-from spindecoupler import AgentSide, BaseCommPoint
+from spindecoupler import AgentSide, BaseCommPoint, ConnectionLost
 
 
 class StepState(Enum):
@@ -150,56 +150,64 @@ class LunarLanderAgent:
         print("[AGENT] running LunarLander loop")
         try:
             while True:
-                now = time.time()
-                self._run_control_tick()
+                try:
+                    now = time.time()
+                    self._run_control_tick()
 
-                if self._state == StepState.EXECUTING_LAST_ACTION:
-                    if now - self._last_action_start >= self._rl_step_period:
-                        # A finished episode stays frozen until the RL side resets it.
-                        self._comm.stepSendObs(
-                            self._build_transport_payload(
-                                terminated=self._term_latched,
-                                truncated=self._trunc_latched,
-                            ),
-                            agenttime=now,
+                    if self._state == StepState.EXECUTING_LAST_ACTION:
+                        if now - self._last_action_start >= self._rl_step_period:
+                            # A finished episode stays frozen until the RL side
+                            # resets it.
+                            self._comm.stepSendObs(
+                                self._build_transport_payload(
+                                    terminated=self._term_latched,
+                                    truncated=self._trunc_latched,
+                                ),
+                                agenttime=now,
+                            )
+                            if self._debug:
+                                print(
+                                    "[AGENT] sent transition obs action={} "
+                                    "term={} trunc={}".format(
+                                        self._last_action,
+                                        self._term_latched,
+                                        self._trunc_latched,
+                                    )
+                                )
+                            self._state = StepState.READY_FOR_RL_COMMAND
+
+                    elif self._state == StepState.AFTER_RESET:
+                        self._comm.resetSendObs(
+                            self._build_transport_payload(), agenttime=now
                         )
                         if self._debug:
-                            print(
-                                "[AGENT] sent transition obs action={} "
-                                "term={} trunc={}".format(
-                                    self._last_action,
-                                    self._term_latched,
-                                    self._trunc_latched,
-                                )
-                            )
+                            print("[AGENT] sent reset observation")
                         self._state = StepState.READY_FOR_RL_COMMAND
 
-                elif self._state == StepState.AFTER_RESET:
-                    self._comm.resetSendObs(
-                        self._build_transport_payload(), agenttime=now
-                    )
-                    if self._debug:
-                        print("[AGENT] sent reset observation")
+                    elif self._state == StepState.READY_FOR_RL_COMMAND:
+                        command = self._comm.readWhatToDo(timeout=self._timeout)
+                        if command is not None:
+                            what, payload = command
+                            if what == AgentSide.WhatToDo.RESET_SEND_OBS:
+                                self._reset_workspace()
+                                self._last_action_start = now
+                                self._state = StepState.AFTER_RESET
+                            elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+                                lat = now - self._last_action_start
+                                self._comm.stepSendLastActDur(lat)
+                                self._last_action_start = now
+                                self._apply_action(int(payload))
+                                self._state = StepState.EXECUTING_LAST_ACTION
+                            elif what == AgentSide.WhatToDo.FINISH:
+                                print("[AGENT] finish command received")
+                                return
+
+                except ConnectionLost:
+                    # Holding the last action while disconnected is not safe.
+                    self._apply_action(self._null_action())
+                    print("[AGENT] connection lost; reconnecting")
+                    self._comm.reconnect()
                     self._state = StepState.READY_FOR_RL_COMMAND
-
-                elif self._state == StepState.READY_FOR_RL_COMMAND:
-                    command = self._comm.readWhatToDo(timeout=self._timeout)
-                    if command is not None:
-                        what, payload = command
-                        if what == AgentSide.WhatToDo.RESET_SEND_OBS:
-                            self._reset_workspace()
-                            self._last_action_start = now
-                            self._state = StepState.AFTER_RESET
-                        elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
-                            lat = now - self._last_action_start
-                            self._comm.stepSendLastActDur(lat)
-                            self._last_action_start = now
-                            self._apply_action(int(payload))
-                            self._state = StepState.EXECUTING_LAST_ACTION
-                        elif what == AgentSide.WhatToDo.FINISH:
-                            print("[AGENT] finish command received")
-                            return
-
                 time.sleep(self._control_period)
         finally:
             self._env.close()

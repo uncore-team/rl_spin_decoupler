@@ -14,8 +14,10 @@ Both are measured with the agent's clock.
 Uncore Team, 2025
 """
 
+import time
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
+from typing import Optional
 
 try:
     from rl_spin_decoupler.socketcomms.comms import (
@@ -47,10 +49,29 @@ __all__ = [
     "AgentSide",
     "BaseCommPoint",
     "ClientCommPoint",
+    "ConnectionLost",
     "RLSide",
     "ServerCommPoint",
     "enable_console_logging",
 ]
+
+
+class ConnectionLost(RuntimeError):
+    """
+    The connection with the other side was lost or left unusable.
+
+    Raised by the protocol calls of :class:`RLSide` and :class:`AgentSide` when a send
+    or a receive fails, including a reply that does not arrive in time: after a
+    partial exchange the stream can no longer be trusted. Call ``reconnect()`` on
+    both sides and start a new episode; the exchange in flight is lost.
+    """
+
+
+def _require_connection(comm):
+    """Raise :class:`ConnectionLost` if the comm point has no open connection."""
+
+    if not comm.is_connected():
+        raise ConnectionLost("Not connected; call reconnect()")
 
 
 class RLSide:
@@ -67,6 +88,9 @@ class RLSide:
 
     It defines no reward and no episode termination; it only moves actions,
     observations and timing values between the two processes.
+
+    If the connection is lost, the protocol calls raise :class:`ConnectionLost`.
+    Call :meth:`reconnect` and then :meth:`resetGetObs` to start a new episode.
     """
 
     def __init__(
@@ -107,6 +131,7 @@ class RLSide:
         if accept_timeout <= 0.0:
             raise ValueError("accept_timeout must be > 0.0")
         self._verbose = verbose
+        self._accept_timeout = accept_timeout
         if self._verbose:
             enable_console_logging()
         self._rlcomm = ServerCommPoint(
@@ -135,6 +160,35 @@ class RLSide:
         if self._verbose:
             logger.info("Communications closed in the RL side.")
 
+    def reconnect(self, timeout: Optional[float] = None):
+        """
+        Close the current connection and wait for an agent on the same port.
+
+        Call it after :class:`ConnectionLost`, then :meth:`resetGetObs`: the agent
+        starts again from a reset. It works whether the same agent reconnects or a
+        new agent process starts.
+
+        Args:
+            timeout: Seconds to wait; ``None`` uses the ``accept_timeout`` given to
+                the constructor.
+
+        Raises:
+            ValueError: If ``timeout`` is not positive.
+            RuntimeError: If no agent connects in time.
+        """
+
+        if timeout is None:
+            timeout = self._accept_timeout
+        elif timeout <= 0.0:
+            raise ValueError("timeout must be > 0.0")
+        if self._verbose:
+            logger.info("Connection lost. Waiting for the agent to reconnect...")
+        res = self._rlcomm.begin(timeoutaccept=timeout)  # closes the old connection
+        if len(res) > 0:
+            raise RuntimeError("No agent reconnection: " + res)
+        if self._verbose:
+            logger.info("Agent reconnected to this RL")
+
     def resetGetObs(self, timeout: float = 10.0):
         """
         Ask the agent to reset the episode and wait for the first observation.
@@ -150,16 +204,17 @@ class RLSide:
             agent time at which it was sampled.
 
         Raises:
-            RuntimeError: If the request cannot be sent or no valid reply arrives.
+            ConnectionLost: If the request cannot be sent or no valid reply arrives.
         """
 
+        _require_connection(self._rlcomm)
         res = self._rlcomm.sendData(dict({"stepkind": "reset"}))
         if len(res) > 0:
-            raise RuntimeError("Error sending what to do to the agent. " + res)
+            raise ConnectionLost("Error sending what to do to the agent. " + res)
 
         res, obsato = self._rlcomm.readData(timeout)
         if len(res) > 0:
-            raise RuntimeError(
+            raise ConnectionLost(
                 "Error reading after-reset observation from the agent. " + res
             )
 
@@ -189,21 +244,22 @@ class RLSide:
             directly comparable.
 
         Raises:
-            RuntimeError: If the action cannot be sent or a reply does not arrive.
+            ConnectionLost: If the action cannot be sent or a reply does not arrive.
         """
 
+        _require_connection(self._rlcomm)
         # The agent picks this up with readWhatToDo().
         res = self._rlcomm.sendData(dict({"stepkind": "step", "action": action}))
         if len(res) > 0:
-            raise RuntimeError("Error sending step action: " + res)
+            raise ConnectionLost("Error sending step action: " + res)
 
         res, lat = self._rlcomm.readData(timeout)  # blocks
         if len(res) > 0:
-            raise RuntimeError("Error receiving last action duration: " + res)
+            raise ConnectionLost("Error receiving last action duration: " + res)
 
         res, obsrewato = self._rlcomm.readData(timeout)  # blocks
         if len(res) > 0:
-            raise RuntimeError("Error receiving step observation: " + res)
+            raise ConnectionLost("Error receiving step observation: " + res)
 
         return lat["lat"], obsrewato["obs"], obsrewato["rew"], obsrewato["ato"]
 
@@ -231,6 +287,10 @@ class AgentSide:
     once when the RL side has sent nothing, so the loop never stalls waiting for
     the learner. The agent is responsible for applying actions, resetting its
     workspace and sampling observations.
+
+    If the connection is lost, the protocol calls raise :class:`ConnectionLost`. The
+    agent should stop acting (holding the last action while disconnected is not safe
+    for every system), call :meth:`reconnect` and wait for a reset.
     """
 
     class WhatToDo(Enum):
@@ -305,6 +365,44 @@ class AgentSide:
         if self._verbose:
             logger.info("Connection with RL finished.")
 
+    def reconnect(self, timeout: float = 60.0, retry_interval: float = 0.5):
+        """
+        Close the current connection and connect to the RL side again.
+
+        Call it after :class:`ConnectionLost`, once the agent has stopped acting (the
+        last action is not safe to hold while disconnected). It retries every
+        ``retry_interval`` seconds, so the RL side may restart in the meantime. After
+        it returns, wait for ``RESET_SEND_OBS`` as at start-up. It blocks the caller
+        while it retries.
+
+        Args:
+            timeout: Seconds to keep retrying.
+            retry_interval: Seconds between attempts.
+
+        Raises:
+            ValueError: If ``timeout`` or ``retry_interval`` is not positive.
+            RuntimeError: If no connection is made in time.
+        """
+
+        if timeout <= 0.0:
+            raise ValueError("timeout must be > 0.0")
+        if retry_interval <= 0.0:
+            raise ValueError("retry_interval must be > 0.0")
+        if self._verbose:
+            logger.info("Connection lost. Reconnecting to the RL side...")
+        deadline = time.monotonic() + timeout
+        while True:
+            res = self._rlcomm.begin()  # closes the old connection first
+            if len(res) == 0:
+                break
+            if time.monotonic() + retry_interval > deadline:
+                raise RuntimeError(
+                    "Could not reconnect to RL within {} s: {}".format(timeout, res)
+                )
+            time.sleep(retry_interval)
+        if self._verbose:
+            logger.info("Agent decoupler reconnected to RL decoupler")
+
     def readWhatToDo(self, timeout: float = 10.0):
         """
         Check whether the RL side has sent a command and read it.
@@ -325,10 +423,11 @@ class AgentSide:
             - ``(WhatToDo.FINISH, None)`` for the end of the experiment.
 
         Raises:
-            RuntimeError: If the command cannot be read.
+            ConnectionLost: If the command cannot be read.
             ValueError: If the command is not one of the three above.
         """
 
+        _require_connection(self._rlcomm)
         if not self._rlcomm.checkDataToRead():
             return None
 
@@ -336,7 +435,7 @@ class AgentSide:
         # 'action': <action>} where 'action' is present only for a step.
         res, ind = self._rlcomm.readData(timeout)
         if len(res) > 0:
-            raise RuntimeError("Error receiving what-to-do from RL: " + res)
+            raise ConnectionLost("Error receiving what-to-do from RL: " + res)
 
         if ind["stepkind"] == "step":
             return (AgentSide.WhatToDo.REC_ACTION_SEND_OBS, ind["action"])
@@ -358,12 +457,13 @@ class AgentSide:
             lat: Seconds the previous action actually lasted, by the agent's clock.
 
         Raises:
-            RuntimeError: If it cannot be sent.
+            ConnectionLost: If it cannot be sent.
         """
 
+        _require_connection(self._rlcomm)
         res = self._rlcomm.sendData(dict({"lat": lat}))
         if len(res) > 0:
-            raise RuntimeError("Error sending lat to RL. " + res)
+            raise ConnectionLost("Error sending lat to RL. " + res)
 
     def stepSendObs(self, obs, agenttime: float = 0.0, rew: float = 0.0):
         """
@@ -380,12 +480,13 @@ class AgentSide:
                 default when the RL side does.
 
         Raises:
-            RuntimeError: If it cannot be sent.
+            ConnectionLost: If it cannot be sent.
         """
 
+        _require_connection(self._rlcomm)
         res = self._rlcomm.sendData(dict({"obs": obs, "rew": rew, "ato": agenttime}))
         if len(res) > 0:
-            raise RuntimeError("Error sending observation/reward to RL. " + res)
+            raise ConnectionLost("Error sending observation/reward to RL. " + res)
 
     def resetSendObs(self, obs, agenttime=0.0):
         """
@@ -398,9 +499,10 @@ class AgentSide:
             agenttime: Time at which ``obs`` was sampled, by the agent's clock.
 
         Raises:
-            RuntimeError: If it cannot be sent.
+            ConnectionLost: If it cannot be sent.
         """
 
+        _require_connection(self._rlcomm)
         res = self._rlcomm.sendData({"obs": obs, "ato": agenttime})
         if len(res) > 0:
-            raise RuntimeError("Error sending observation to RL. " + res)
+            raise ConnectionLost("Error sending observation to RL. " + res)

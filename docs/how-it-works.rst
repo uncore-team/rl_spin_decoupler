@@ -65,3 +65,28 @@ Unpickling arbitrary data can run arbitrary code. By default the receiver only a
 plain data and NumPy arrays and scalars, and refuses any other class; pass
 ``allow_pickle=True`` to ``RLSide`` and ``AgentSide`` to send your own classes between
 endpoints you trust.
+
+Connection loss
+---------------
+
+If the connection drops (the agent process restarts, the learner restarts, or the
+network fails), the next protocol call raises
+:class:`~spindecoupler.ConnectionLost`, a subclass of ``RuntimeError``. A reply that
+does not arrive in time counts as a drop too, because the stream is then left half
+read.
+
+To recover, the agent stops acting and calls :meth:`spindecoupler.AgentSide.reconnect`,
+which retries until the learner listens again. The learner calls
+:meth:`spindecoupler.RLSide.reconnect` and starts with a ``reset``. The exchange in
+flight is lost and the episode is truncated: the agent kept acting during the outage,
+so that transition is no longer valid.
+
+``DecoupledEnv(reconnect=True)`` does this on its own. The step that met the drop is
+returned with ``truncated=True`` and ``info["connection_lost"]`` set, with ``lat`` and
+``t_agent`` as NaN, and the next ``reset()`` starts a new episode.
+
+Both ends enable TCP keepalive (5 s without traffic, then a probe every second, three
+failed probes), so a silent drop of the network is noticed in about 8 s, instead of
+leaving the agent waiting with its last action applied. If the drop happens while data
+is still unacknowledged, the retransmission timer of the operating system decides, and
+it can take longer.

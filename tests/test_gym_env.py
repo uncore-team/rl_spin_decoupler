@@ -9,6 +9,7 @@ pytest.importorskip("gymnasium")
 import numpy as np  # noqa: E402
 from gymnasium import spaces  # noqa: E402
 
+from spindecoupler import ConnectionLost  # noqa: E402
 from spindecoupler_gym import DecoupledEnv  # noqa: E402
 
 
@@ -19,11 +20,23 @@ class FakeRL:
         self.actions = []
         self.finished = 0
         self.fail_finish = False
+        self.fail_steps = 0
+        self.fail_resets = 0
+        self.reconnects = 0
 
     def resetGetObs(self, timeout):
+        if self.fail_resets:
+            self.fail_resets -= 1
+            raise ConnectionLost("reset lost")
         return [1.0, 2.0], 5.0
 
+    def reconnect(self):
+        self.reconnects += 1
+
     def stepSendActGetObs(self, action, timeout):
+        if self.fail_steps:
+            self.fail_steps -= 1
+            raise ConnectionLost("step lost")
         self.actions.append(action)
         return 0.05, [3.0, 4.0], 0.0, 6.0
 
@@ -116,3 +129,54 @@ def test_close_sends_finish_once_and_tolerates_failure():
     rl2.fail_finish = True
     make_env(rl2).close()  # logged, not raised
     assert rl2.finished == 1
+
+
+def test_connection_loss_propagates_without_reconnect():
+    rl = FakeRL()
+    env = make_env(rl)
+    env.reset()
+    rl.fail_steps = 1
+    with pytest.raises(ConnectionLost):
+        env.step(0)
+    rl.fail_resets = 1
+    with pytest.raises(ConnectionLost):
+        env.reset()
+    assert rl.reconnects == 0
+
+
+def test_step_truncates_and_reconnects_after_a_lost_connection():
+    rl = FakeRL()
+    env = make_env(rl, reconnect=True)
+    first_obs, _ = env.reset()
+    rl.fail_steps = 1
+
+    obs, reward, terminated, truncated, info = env.step(0)
+
+    assert obs is first_obs
+    assert reward == 0.0
+    assert terminated is False
+    assert truncated is True
+    assert info["connection_lost"] is True
+    assert np.isnan(info["lat"]) and np.isnan(info["t_agent"])
+    assert env.connection_losses == 1
+    assert rl.reconnects == 1
+    env.reset()
+    _, _, _, truncated, info = env.step(0)
+    assert truncated is False
+    assert info["connection_lost"] is False
+
+
+def test_reset_retries_once_after_a_lost_connection():
+    rl = FakeRL()
+    env = make_env(rl, reconnect=True)
+    rl.fail_resets = 1
+
+    obs, info = env.reset()
+
+    assert list(obs) == [1.0, 2.0]
+    assert rl.reconnects == 1
+    assert env.connection_losses == 1
+
+    rl.fail_resets = 2
+    with pytest.raises(ConnectionLost):
+        env.reset()

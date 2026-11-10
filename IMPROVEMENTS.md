@@ -63,3 +63,9 @@ al., 2026). The released package extends that work in the following ways.
     (`send_timeout`), the server socket sets `SO_REUSEADDR` on POSIX, the wait for the
     agent is configurable (`accept_timeout`), and the `verbose` output goes through
     `logging`.
+
+12. Recovery from a lost connection. The protocol calls raise `ConnectionLost` (a
+    `RuntimeError`), both sides have `reconnect()`, and `DecoupledEnv(reconnect=True)`
+    truncates the episode in progress and carries on with a new one. TCP keepalive on
+    both ends detects a silent network drop in about 8 s.
+

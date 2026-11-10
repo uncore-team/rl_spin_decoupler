@@ -10,6 +10,8 @@ All notable changes to this repository are documented in this file.
 - `verbose` messages go through the `spindecoupler` logger instead of `print`, and `setDebug()` logs at debug level. `verbose=True` still shows them on the standard output.
 
 ### Changed
+- Protocol calls of `RLSide` and `AgentSide` raise `ConnectionLost`, a subclass of `RuntimeError`, when the connection is lost or a reply does not arrive in time.
+- Both ends enable TCP keepalive (5 s idle, 1 s interval, 3 probes), so a silent network drop is detected in about 8 s.
 - `sendData()` has a timeout (`send_timeout`, 10 s): a peer that stops reading no longer blocks the sender forever. On timeout the connection is closed.
 - `checkDataToRead()` reports `Cannot check data in not-begun commpoint`, and `errno` is imported instead of read through `socket`.
 - Both ends of the socket now set `TCP_NODELAY`. A protocol step is a short request followed by two short replies sent back to back, and with Nagle's algorithm on the second reply waited for the delayed ACK of the first (up to 40 ms on Linux). On loopback the exchange went from 44 ms to 0.14 ms, and the `LAT` reported by the agent no longer includes that wait.
@@ -18,6 +20,8 @@ All notable changes to this repository are documented in this file.
 - READMEs of the library and of every example follow the same structure and style (see `CONTRIBUTING.md`).
 
 ### Added
+- `RLSide.reconnect()` and `AgentSide.reconnect()`, and `reconnect=True` in `DecoupledEnv`, which truncates the episode on a lost connection and reconnects. The LunarLander example uses it.
+- `BaseCommPoint.is_connected()`.
 - `spindecoupler_gym.DecoupledEnv`, a reusable Gymnasium environment on top of `RLSide`. The LunarLander example uses it.
 - `benchmarks/` with `bench_transport.py` (step cost with and without `TCP_NODELAY`) and `bench_decoupling.py` (control loop regularity, coupled against decoupled), their results, and a test that runs them.
 - Documentation pages for the benchmarks and the related work, `CITATION.cff`, `SECURITY.md`, and a workflow that builds the distributions and publishes them to PyPI when a release is published.
