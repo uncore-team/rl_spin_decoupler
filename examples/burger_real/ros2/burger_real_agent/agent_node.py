@@ -32,7 +32,7 @@ from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from spindecoupler import AgentSide, BaseCommPoint
+from spindecoupler import AgentSide, BaseCommPoint, ConnectionLost
 
 from .contract import (
     ANGULAR_VELOCITY_LIMIT,
@@ -78,6 +78,7 @@ class BurgerRealAgent(Node):
         timeout: float,
         sensor_timeout: float,
         debug: bool,
+        reconnect_timeout: float = 180.0,
     ):
         super().__init__("burger_real_agent")
         if rl_step_period <= control_period:
@@ -89,6 +90,7 @@ class BurgerRealAgent(Node):
         self._control_period = control_period
         self._timeout = timeout
         self._sensor_timeout = sensor_timeout
+        self._reconnect_timeout = reconnect_timeout
         self._debug = debug
         self._comm = AgentSide(ip, port, verbose=debug)
         self._tf_buffer = Buffer()
@@ -299,40 +301,50 @@ class BurgerRealAgent(Node):
         self.get_logger().info("Running real Burger ROS2 agent")
         try:
             while rclpy.ok():
-                now = time.monotonic()
-                self._run_control_tick()
-                if self._state == StepState.EXECUTING_LAST_ACTION:
-                    if now - self._last_action_start >= self._rl_step_period:
-                        self._comm.stepSendObs(
+                try:
+                    now = time.monotonic()
+                    self._run_control_tick()
+                    if self._state == StepState.EXECUTING_LAST_ACTION:
+                        if now - self._last_action_start >= self._rl_step_period:
+                            self._comm.stepSendObs(
+                                self._build_payload(), agenttime=time.time()
+                            )
+                            self._state = StepState.READY_FOR_RL_COMMAND
+                    elif self._state == StepState.AFTER_RESET:
+                        self._comm.resetSendObs(
                             self._build_payload(), agenttime=time.time()
                         )
                         self._state = StepState.READY_FOR_RL_COMMAND
-                elif self._state == StepState.AFTER_RESET:
-                    self._comm.resetSendObs(
-                        self._build_payload(), agenttime=time.time()
-                    )
+                    else:
+                        command = self._comm.readWhatToDo(timeout=self._timeout)
+                        if command is not None:
+                            what, payload = command
+                            if what == AgentSide.WhatToDo.RESET_SEND_OBS:
+                                self._term_latched = False
+                                self._trunc_latched = False
+                                self._frozen = False
+                                self._publish_stop()
+                                self._wait_for_new_goal()
+                                self._last_action_start = time.monotonic()
+                                self._state = StepState.AFTER_RESET
+                            elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+                                self._comm.stepSendLastActDur(
+                                    time.monotonic() - self._last_action_start
+                                )
+                                self._last_action_start = time.monotonic()
+                                self._last_action = [
+                                    float(payload[0]),
+                                    float(payload[1]),
+                                ]
+                                self._state = StepState.EXECUTING_LAST_ACTION
+                            elif what == AgentSide.WhatToDo.FINISH:
+                                return
+                except ConnectionLost:
+                    # Holding the last action while disconnected is not safe.
+                    self._publish_stop()
+                    self.get_logger().warning("Connection lost; reconnecting")
+                    self._comm.reconnect(timeout=self._reconnect_timeout)
                     self._state = StepState.READY_FOR_RL_COMMAND
-                else:
-                    command = self._comm.readWhatToDo(timeout=self._timeout)
-                    if command is not None:
-                        what, payload = command
-                        if what == AgentSide.WhatToDo.RESET_SEND_OBS:
-                            self._term_latched = False
-                            self._trunc_latched = False
-                            self._frozen = False
-                            self._publish_stop()
-                            self._wait_for_new_goal()
-                            self._last_action_start = time.monotonic()
-                            self._state = StepState.AFTER_RESET
-                        elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
-                            self._comm.stepSendLastActDur(
-                                time.monotonic() - self._last_action_start
-                            )
-                            self._last_action_start = time.monotonic()
-                            self._last_action = [float(payload[0]), float(payload[1])]
-                            self._state = StepState.EXECUTING_LAST_ACTION
-                        elif what == AgentSide.WhatToDo.FINISH:
-                            return
                 time.sleep(self._control_period)
         except KeyboardInterrupt:
             pass
@@ -375,6 +387,13 @@ def parse_args() -> argparse.Namespace:
         help="Seconds of sensor silence tolerated before truncating the attempt. "
         "Raise it if the sensors can be slow (e.g. a simulator below real time).",
     )
+    parser.add_argument(
+        "--reconnect-timeout",
+        type=float,
+        default=180.0,
+        help="Seconds to keep retrying after a lost connection; the RL side may need "
+        "minutes to restart (it imports PyTorch)",
+    )
     parser.add_argument("--debug", action="store_true", help="Verbose transport logs")
     # Strip ROS2-injected tokens (--ros-args, -p key:=value, --) so this
     # node's own flags can be passed as: ros2 run ... -- --ip ... --port ...
@@ -394,6 +413,7 @@ def main() -> None:
             timeout=args.timeout,
             sensor_timeout=args.sensor_timeout,
             debug=args.debug,
+            reconnect_timeout=args.reconnect_timeout,
         )
         agent.spinloop()
     finally:

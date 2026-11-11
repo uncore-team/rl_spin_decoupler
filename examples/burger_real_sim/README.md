@@ -89,6 +89,10 @@ offer a new goal. The library gives the agent 60 seconds to connect once the RL 
 listens, so the script starts the agent right after it. If a component exits, the script
 says which one and where its log is.
 
+The recovery from a lost connection works as with the real robot (see
+[`burger_real`](../burger_real/README.md#timeouts)); the bridge offers the new goal by
+itself.
+
 ## ROS2 interface
 
 It is the interface of the real robot:

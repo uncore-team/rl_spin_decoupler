@@ -92,3 +92,10 @@ def test_demo_script_is_valid_bash():
 
     assert script.is_file()
     subprocess.run(["bash", "-n", str(script)], check=True)
+
+
+def test_agent_reconnects_after_a_lost_connection():
+    source = (EXAMPLE_DIR / "agent_side_burger_coppeliasim.py").read_text()
+
+    assert "except ConnectionLost" in source
+    assert "reconnect(timeout=" in source

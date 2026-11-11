@@ -149,6 +149,13 @@ long each action is applied, and `--control-period` (0.01 s) is how often the se
 polled and the action is re-published. The RL side waits 60 seconds for the agent to
 connect, a limit fixed in `spindecoupler`.
 
+If the agent restarts or the network drops, the connection is lost. The environment uses
+`reconnect=True`: the mission in progress is truncated and the RL side waits up to 60
+seconds for the agent. The agent stops the robot and retries for `--reconnect-timeout`
+seconds (180 by default). After reconnecting, the RL side resets, so the agent waits for a
+new `/goal_pose` like at the start of any mission. A mission lost this way does not count
+for `--episodes`.
+
 ## Files
 
 ```

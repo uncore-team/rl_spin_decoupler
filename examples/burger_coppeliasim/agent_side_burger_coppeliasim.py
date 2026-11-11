@@ -28,7 +28,7 @@ import numpy as np
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from episode_config import COLLISION_LIDAR_THRESHOLD, NUM_LIDAR_SECTORS, OBS_DIM
 
-from spindecoupler import AgentSide, BaseCommPoint
+from spindecoupler import AgentSide, BaseCommPoint, ConnectionLost
 
 # The scene is shared with examples/burger_real_sim. It is located from this file
 # so that the working directory does not matter.
@@ -71,6 +71,7 @@ class CoppeliaBurgerAgent:
         sim_port: int = 23000,
         scene_path: str | None = None,
         debug: bool = False,
+        reconnect_timeout: float = 180.0,
     ):
         if rl_step_period <= control_period:
             raise ValueError(
@@ -79,6 +80,7 @@ class CoppeliaBurgerAgent:
 
         self._debug = debug
         self._timeout = timeout
+        self._reconnect_timeout = reconnect_timeout
         self._rl_step_period = rl_step_period
         self._control_period = control_period
 
@@ -201,51 +203,58 @@ class CoppeliaBurgerAgent:
         print("[AGENT] Running CoppeliaSim Burger loop")
         try:
             while True:
-                now = time.time()
-                self._run_control_tick()
+                try:
+                    now = time.time()
+                    self._run_control_tick()
 
-                if self._state == StepState.EXECUTING_LAST_ACTION:
-                    if now - self._last_action_start >= self._rl_step_period:
-                        # A collided episode stays frozen until the RL side resets it.
-                        self._comm.stepSendObs(
-                            self._build_transport_payload(
-                                terminated=self._term_latched, truncated=False
-                            ),
-                            agenttime=now,
+                    if self._state == StepState.EXECUTING_LAST_ACTION:
+                        if now - self._last_action_start >= self._rl_step_period:
+                            # A collided episode stays frozen until the RL side
+                            # resets it.
+                            self._comm.stepSendObs(
+                                self._build_transport_payload(
+                                    terminated=self._term_latched, truncated=False
+                                ),
+                                agenttime=now,
+                            )
+                            if self._debug:
+                                print(
+                                    f"[AGENT] Sent obs action={self._last_action} "
+                                    f"terminated={self._term_latched}"
+                                )
+                            self._state = StepState.READY_FOR_RL_COMMAND
+
+                    elif self._state == StepState.AFTER_RESET:
+                        self._comm.resetSendObs(
+                            self._build_transport_payload(), agenttime=now
                         )
                         if self._debug:
-                            print(
-                                f"[AGENT] Sent obs action={self._last_action} "
-                                f"terminated={self._term_latched}"
-                            )
+                            print("[AGENT] Sent reset observation")
                         self._state = StepState.READY_FOR_RL_COMMAND
 
-                elif self._state == StepState.AFTER_RESET:
-                    self._comm.resetSendObs(
-                        self._build_transport_payload(), agenttime=now
-                    )
-                    if self._debug:
-                        print("[AGENT] Sent reset observation")
+                    elif self._state == StepState.READY_FOR_RL_COMMAND:
+                        command = self._comm.readWhatToDo(timeout=self._timeout)
+                        if command is not None:
+                            what, payload = command
+                            if what == AgentSide.WhatToDo.RESET_SEND_OBS:
+                                self._reset_workspace()
+                                self._last_action_start = now
+                                self._state = StepState.AFTER_RESET
+                            elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+                                lat = now - self._last_action_start
+                                self._comm.stepSendLastActDur(lat)
+                                self._last_action_start = now
+                                self._apply_action(payload)
+                                self._state = StepState.EXECUTING_LAST_ACTION
+                            elif what == AgentSide.WhatToDo.FINISH:
+                                print("[AGENT] Finish command received")
+                                return
+                except ConnectionLost:
+                    # Holding the last action while disconnected is not safe.
+                    self._apply_action(self._null_action())
+                    print("[AGENT] Connection lost; reconnecting")
+                    self._comm.reconnect(timeout=self._reconnect_timeout)
                     self._state = StepState.READY_FOR_RL_COMMAND
-
-                elif self._state == StepState.READY_FOR_RL_COMMAND:
-                    command = self._comm.readWhatToDo(timeout=self._timeout)
-                    if command is not None:
-                        what, payload = command
-                        if what == AgentSide.WhatToDo.RESET_SEND_OBS:
-                            self._reset_workspace()
-                            self._last_action_start = now
-                            self._state = StepState.AFTER_RESET
-                        elif what == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
-                            lat = now - self._last_action_start
-                            self._comm.stepSendLastActDur(lat)
-                            self._last_action_start = now
-                            self._apply_action(payload)
-                            self._state = StepState.EXECUTING_LAST_ACTION
-                        elif what == AgentSide.WhatToDo.FINISH:
-                            print("[AGENT] Finish command received")
-                            return
-
                 time.sleep(self._control_period)
         finally:
             self._sim.stopSimulation()
@@ -288,6 +297,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sim-port", type=int, default=23000, help="CoppeliaSim ZMQ remote API port"
     )
+    parser.add_argument(
+        "--reconnect-timeout",
+        type=float,
+        default=180.0,
+        help="Seconds to keep retrying after a lost connection; the RL side may need "
+        "minutes to restart (it imports PyTorch)",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose logs")
     return parser.parse_args()
 
@@ -311,6 +327,7 @@ def main() -> None:
             sim_port=args.sim_port,
             scene_path=args.scene_path,
             debug=args.debug,
+            reconnect_timeout=args.reconnect_timeout,
         )
         agent.spinloop()
     except KeyboardInterrupt:

@@ -50,8 +50,8 @@ al., 2026). The released package extends that work in the following ways.
 
 9. Gymnasium environment. `spindecoupler_gym.DecoupledEnv` is the wrapper that the
    examples repeated: a task only supplies the reward and the end of the episode. The
-   LunarLander example is the only one that uses it so far. The other examples keep their
-   own environment classes, and could adopt it the same way.
+   LunarLander and Burger examples use it; the first-order plant example, which has no
+   Gymnasium environment, does not.
 
 10. Benchmarks. Two scripts reproduce the timing claims: the cost of a step with and
     without `TCP_NODELAY`, and the regularity of the agent's control loop against the
@@ -68,6 +68,6 @@ al., 2026). The released package extends that work in the following ways.
 12. Recovery from a lost connection. The protocol calls raise `ConnectionLost` (a
     `RuntimeError`), both sides have `reconnect()`, and `DecoupledEnv(reconnect=True)`
     truncates the episode in progress and carries on with a new one. TCP keepalive on
-    both ends detects a silent network drop in about 8 s. Only the LunarLander example
-    handles the drop so far; the others could do the same with `reconnect()`.
+    both ends detects a silent network drop in about 8 s. The LunarLander and Burger
+    examples handle the drop; the first-order plant example does not.
 

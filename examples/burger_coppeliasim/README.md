@@ -97,6 +97,12 @@ after the RL side.
 
 If a component exits, the script says which one and where its log is.
 
+If the agent restarts or the network drops, the connection is lost. The environment is
+built on `DecoupledEnv` with `reconnect=True`: the episode in progress is truncated and the
+RL side waits up to 60 seconds for the agent. The agent stops the robot and retries for
+`--reconnect-timeout` seconds (180 by default, since the RL side may take minutes to
+restart), and training goes on with a new episode.
+
 ## Task definition
 
 The observation has 10 floats: `[distance_to_goal, relative_goal_angle, ray_1 ... ray_8]`.

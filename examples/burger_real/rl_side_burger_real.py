@@ -16,11 +16,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
-import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from stable_baselines3 import SAC
@@ -35,9 +33,10 @@ from contract import (  # noqa: E402
 from reward import compute_reward, is_goal_reached, is_truncated  # noqa: E402
 
 from spindecoupler import RLSide  # noqa: E402
+from spindecoupler_gym import DecoupledEnv  # noqa: E402
 
 
-class DecoupledBurgerRealEnv(gym.Env):
+class DecoupledBurgerRealEnv(DecoupledEnv):
     """Gymnasium view over the ROS2 agent and the decoupler socket.
 
     Observation (10 floats): ``[distance_to_goal, relative_goal_angle,
@@ -46,25 +45,16 @@ class DecoupledBurgerRealEnv(gym.Env):
     Action (2 floats): ``[linear_x (m/s), angular_z (rad/s)]``.
     """
 
-    metadata = {"render_modes": []}
-
     def __init__(
         self,
         port: int,
         timeout: float,
         max_steps: int,
         debug: bool,
+        reconnect: bool = True,
     ):
-        super().__init__()
-        self._timeout = timeout
-        self._max_steps = max_steps
-        self._debug = debug
-        self._comm = RLSide(port, verbose=debug)
-        self._finished = False
-        self._step_count = 0
-        self._prev_obs: np.ndarray | None = None
         # The 0.16 m lower bound on the rays is the collision threshold.
-        self.observation_space = spaces.Box(
+        observation_space = spaces.Box(
             low=np.array([0.0, -np.pi] + [0.16] * NUM_LIDAR_SECTORS, dtype=np.float32),
             high=np.array(
                 [3.0, np.pi] + [LIDAR_MAX_RANGE] * NUM_LIDAR_SECTORS,
@@ -72,13 +62,23 @@ class DecoupledBurgerRealEnv(gym.Env):
             ),
             dtype=np.float32,
         )
-        self.action_space = spaces.Box(
+        action_space = spaces.Box(
             low=np.array([0.0, -0.6], dtype=np.float32),
             high=np.array([0.15, 0.6], dtype=np.float32),
             dtype=np.float32,
         )
+        super().__init__(
+            RLSide(port, verbose=debug),
+            observation_space=observation_space,
+            action_space=action_space,
+            timeout=timeout,
+            max_steps=max_steps,
+            debug=debug,
+            reconnect=reconnect,
+        )
 
-    def _parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+    def parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+        """Split the agent's payload into observation, terminated and truncated."""
         if isinstance(payload, dict):
             observation = payload.get("observation", payload)
             terminated = bool(payload.get("terminated", False))
@@ -95,43 +95,18 @@ class DecoupledBurgerRealEnv(gym.Env):
             )
         return array, terminated, truncated
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
-        super().reset(seed=seed)
-        payload, agent_time = self._comm.resetGetObs(timeout=self._timeout)
-        observation, _, _ = self._parse_payload(payload)
-        self._step_count = 0
-        self._prev_obs = observation.copy()
-        return observation, {"t_agent": agent_time, "step_count": 0}
+    def step(self, action):
+        # The agent receives a plain list of floats, not a NumPy array.
+        return super().step(action.tolist())
 
-    def step(self, action: np.ndarray):
-        latency, payload, _, agent_time = self._comm.stepSendActGetObs(
-            action.tolist(), timeout=self._timeout
-        )
-        observation, physics_terminated, physics_truncated = self._parse_payload(
-            payload
-        )
-        reward = compute_reward(observation, action, self._prev_obs, float(latency))
-        self._step_count += 1
-        terminated = bool(physics_terminated or is_goal_reached(observation))
-        truncated = bool(
-            physics_truncated or is_truncated(self._step_count, self._max_steps)
-        )
-        self._prev_obs = observation.copy()
-        info = {
-            "lat": float(latency),
-            "t_agent": agent_time,
-            "t_wall": time.time(),
-            "step_count": self._step_count,
-            "terminated_physics": physics_terminated,
-            "truncated_physics": physics_truncated,
-        }
-        return observation, reward, terminated, truncated, info
+    def compute_reward(self, obs, action, prev_obs, lat):
+        return compute_reward(obs, action, prev_obs, lat)
 
-    def close(self):
-        if self._finished:
-            return
-        self._finished = True
-        self._comm.stepExpFinished(timeout=self._timeout)
+    def is_terminated(self, obs):
+        return is_goal_reached(obs)
+
+    def is_truncated(self, step_count, max_steps):
+        return is_truncated(step_count, max_steps)
 
 
 def parse_args() -> argparse.Namespace:
@@ -183,7 +158,11 @@ def main() -> None:
         observation, _ = environment.reset()
         while True:
             action, _ = model.predict(observation, deterministic=True)
-            observation, _, terminated, truncated, _ = environment.step(action)
+            observation, _, terminated, truncated, info = environment.step(action)
+            if info.get("connection_lost"):
+                print("[RL] connection lost; episode dropped, starting a new one")
+                observation, _ = environment.reset()
+                continue
             if terminated or truncated:
                 episodes_done += 1
                 print(

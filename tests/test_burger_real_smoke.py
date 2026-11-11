@@ -175,3 +175,10 @@ def test_burger_real_tunnel_forwards_the_requested_ports(tmp_path):
     first, second = calls(tmp_path, "ssh")
     assert has_pair(first, "-L", "49054:127.0.0.1:49054")
     assert has_pair(second, "-L", "50000:127.0.0.1:49054")
+
+
+def test_agent_node_reconnects_after_a_lost_connection():
+    source = (CONTRACT_DIR / "agent_node.py").read_text()
+
+    assert "except ConnectionLost" in source
+    assert "reconnect(timeout=" in source

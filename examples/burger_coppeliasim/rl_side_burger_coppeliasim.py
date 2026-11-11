@@ -17,16 +17,17 @@ Who decides what:
 
 An episode ends when either side says so. Start this process first: it waits up
 to 60 s for the agent to connect. The trained model is saved at the end.
+
+The environment is built on ``DecoupledEnv``. If the connection drops, the episode in
+progress is truncated and this process waits up to 60 s for the agent to come back.
 """
 
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 from typing import Any
 
-import gymnasium as gym
 import numpy as np
 from episode_config import (
     COLLISION_LIDAR_THRESHOLD,
@@ -41,9 +42,10 @@ from reward import compute_reward, is_goal_reached, is_truncated
 from stable_baselines3 import SAC
 
 from spindecoupler import RLSide
+from spindecoupler_gym import DecoupledEnv
 
 
-class DecoupledCoppeliaBurgerEnv(gym.Env):
+class DecoupledCoppeliaBurgerEnv(DecoupledEnv):
     """Gymnasium environment backed by the decoupler socket (see module docstring).
 
     Observation (10 floats): ``[distance_to_goal, relative_goal_angle, ray_1, ...,
@@ -51,27 +53,17 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
     Action (2 floats): ``[linear_x (m/s), angular_z (rad/s)]``.
     """
 
-    metadata = {"render_modes": []}
-
     def __init__(
         self,
         port: int,
         timeout: float = 10.0,
         max_steps: int = 500,
         debug: bool = False,
+        reconnect: bool = True,
     ):
-        super().__init__()
-        self._timeout = timeout
-        self._max_steps = max_steps
-        self._debug = debug
-        self._comm = RLSide(port, verbose=debug)
-        self._finished = False
-        self._step_count = 0
-        self._prev_obs: np.ndarray | None = None
-
         # The lower bound of the rays is the collision threshold: a smaller
         # reading ends the episode.
-        self.observation_space = spaces.Box(
+        observation_space = spaces.Box(
             low=np.array(
                 [0.0, -np.pi] + [COLLISION_LIDAR_THRESHOLD] * NUM_LIDAR_SECTORS,
                 dtype=np.float32,
@@ -84,15 +76,25 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
         )
 
         # Forward velocity only (no reversing); turning in both directions.
-        self.action_space = spaces.Box(
+        action_space = spaces.Box(
             low=np.array([0.0, -MAX_ANGULAR_VELOCITY], dtype=np.float32),
             high=np.array(
                 [MAX_LINEAR_VELOCITY, MAX_ANGULAR_VELOCITY], dtype=np.float32
             ),
             dtype=np.float32,
         )
+        super().__init__(
+            RLSide(port, verbose=debug),
+            observation_space=observation_space,
+            action_space=action_space,
+            timeout=timeout,
+            max_steps=max_steps,
+            debug=debug,
+            reconnect=reconnect,
+        )
 
-    def _parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+    def parse_payload(self, payload: Any) -> tuple[np.ndarray, bool, bool]:
+        """Split the agent's payload into observation, terminated and truncated."""
         if isinstance(payload, dict):
             obs_payload = payload.get("observation", payload)
             terminated = bool(payload.get("terminated", False))
@@ -110,62 +112,18 @@ class DecoupledCoppeliaBurgerEnv(gym.Env):
             )
         return obs, terminated, truncated
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
-        super().reset(seed=seed)
-        payload, ato = self._comm.resetGetObs(timeout=self._timeout)
-        obs, _terminated, _truncated = self._parse_payload(payload)
-        self._step_count = 0
-        self._prev_obs = obs.copy()
+    def step(self, action):
+        # The agent receives a plain list of floats, not a NumPy array.
+        return super().step(action.tolist())
 
-        info: dict[str, Any] = {"t_agent": ato, "step_count": self._step_count}
-        if self._debug:
-            print(f"[RL] reset ato={ato:.6f} obs={obs.tolist()}")
-        return obs, info
+    def compute_reward(self, obs, action, prev_obs, lat):
+        return compute_reward(obs, action, prev_obs, lat)
 
-    def step(self, action: np.ndarray):
-        action_list = action.tolist()
-        # The transported reward slot is unused: reward is computed here.
-        lat, payload, _rew_unused, ato = self._comm.stepSendActGetObs(
-            action_list, timeout=self._timeout
-        )
-        obs, term_phys, trunc_phys = self._parse_payload(payload)
+    def is_terminated(self, obs):
+        return is_goal_reached(obs)
 
-        reward = compute_reward(obs, action, self._prev_obs, float(lat))
-
-        self._step_count += 1
-        # terminated: collision reported by the agent, or goal reached.
-        terminated = bool(term_phys or is_goal_reached(obs))
-        # truncated: reported by the agent, or step budget spent.
-        truncated = bool(trunc_phys or is_truncated(self._step_count, self._max_steps))
-        self._prev_obs = obs.copy()
-
-        t_wall = time.time()
-        info: dict[str, Any] = {
-            "lat": float(lat),
-            "t_agent": ato,
-            "t_wall": t_wall,
-            "step_count": self._step_count,
-            "terminated_physics": bool(term_phys),
-            "truncated_physics": bool(trunc_phys),
-        }
-
-        if self._debug:
-            print(
-                f"[RL] step action={action_list} lat={lat:.6f}s "
-                f"ato={ato:.6f} rew={reward:.6f} term={terminated} trunc={truncated}"
-            )
-
-        return obs, reward, terminated, truncated, info
-
-    def close(self):
-        if self._finished:
-            return
-        self._finished = True
-        try:
-            self._comm.stepExpFinished(timeout=self._timeout)
-        except Exception as exc:
-            if self._debug:
-                print(f"[RL] close warning: {exc}")
+    def is_truncated(self, step_count, max_steps):
+        return is_truncated(step_count, max_steps)
 
 
 def parse_args() -> argparse.Namespace:
